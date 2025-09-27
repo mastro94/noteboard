@@ -1,0 +1,25 @@
+:root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+.container { max-width: 1180px; margin: 24px auto; padding: 0 12px; }
+.header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.subtitle { opacity: .7; font-size: 14px; }
+.toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
+.addForm { display: flex; gap: 8px; flex-wrap: wrap; }
+.toolsRight { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; min-height: 70vh; }
+.input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; min-width: 200px; }
+.btn { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: white; cursor: pointer; }
+.primaryBtn { padding: 8px 12px; border: 1px solid #2d6cdf; background: #2d6cdf; color: white; border-radius: 8px; cursor: pointer; }
+.warnBtn { padding: 8px 12px; border: 1px solid #e9b100; background: #e9b100; color: white; border-radius: 8px; cursor: pointer; }
+.importLabel { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: white; cursor: pointer; }
+
+/* Column */
+.column { background: #f6f6f6; border-radius: 12px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.columnHeader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.count { background: white; border-radius: 8px; padding: 2px 8px; font-size: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+
+/* Card */
+.card { background: white; border-radius: 10px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 8px; cursor: grab; }
+.cardTitle { font-weight: 600; margin-bottom: 4px; }
+.cardDesc { color: #555; font-size: 14px; white-space: pre-wrap; }
+.cardActions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.dangerBtn { padding: 8px 12px; border: 1px solid #dc2626; background: #dc2626; color: white; border-radius: 8px; cursor: pointer; }
