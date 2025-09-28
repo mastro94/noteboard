@@ -6,35 +6,28 @@ const headers  = {
   "X-API-KEY": API_KEY || "",
 };
 
+function authHeader(){
+  const t = localStorage.getItem('nb_token')
+  return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
 async function http(path, opts={}) {
-  const res = await fetch(`${API_BASE}${path}`, { headers, ...opts });
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(opts.headers||{}) },
+    ...opts
+  })
   if (!res.ok) {
-    const text = await res.text().catch(()=> "");
-    console.error("[Noteboard] API error", res.status, path, text);
-    throw new Error(`API ${res.status}: ${text}`);
+    const text = await res.text().catch(()=> '')
+    throw new Error(`${res.status} ${text}`)
   }
-  return res.status === 204 ? null : res.json();
+  return res.status === 204 ? null : res.json()
 }
 
 export const storageApi = {
   mode: "api",
-  async listTasks() {
-    return http("/tasks", { method: "GET" });
-  },
-  async createTask(payload) {
-    return http("/tasks", { method: "POST", body: JSON.stringify(payload) });
-  },
-  async updateTask(id, payload) {
-    return http(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
-  },
-  async deleteTask(id) {
-    await http(`/tasks/${id}`, { method: "DELETE" });
-    return true;
-  },
-  async reorderColumn(status, orderedIds) {
-    return http("/tasks/reorder", {
-      method: "POST",
-      body: JSON.stringify({ status, ordered_ids: orderedIds }),
-    });
-  },
+  listTasks(){ return http('/tasks') },
+  createTask(payload){ return http('/tasks', { method:'POST', body: JSON.stringify(payload) }) },
+  updateTask(id, payload){ return http(`/tasks/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
+  deleteTask(id){ return http(`/tasks/${id}`, { method:'DELETE' }) },
+  reorderColumn(status, orderedIds){ return http('/tasks/reorder', { method:'POST', body: JSON.stringify({ status, ordered_ids: orderedIds }) }) }
 };

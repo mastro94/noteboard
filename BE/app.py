@@ -1,43 +1,48 @@
-import os
-from datetime import datetime
+import os, jwt
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
-from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session, relationship
+from passlib.hash import pbkdf2_sha256
 
-# -------------------------
-# Configurazione
-# -------------------------
-API_KEY = os.environ.get("API_KEY", "change-me-long-and-random")
+# ---- Config ----
+SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secret")
+JWT_SECRET = os.environ.get("JWT_SECRET", "change-jwt-secret")
+JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "72"))
 DB_URL = os.environ.get("DB_URL", "sqlite:///noteboard.db")
-
-# CORS: consenti localhost e GitHub Pages (sostituisci <user> e <repo> se necessario)
-ALLOWED_ORIGINS = os.environ.get(
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS",
     "http://localhost:5173,https://<user>.github.io,https://<user>.github.io/<repo>"
-).split(",")
+).split(",")]
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {
-     "origins": [o.strip() for o in ALLOWED_ORIGINS],
-     "methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-     "allow_headers": ["Content-Type", "X-API-KEY"],
- }})
+    "origins": ALLOWED_ORIGINS,
+    "methods": ["GET","POST","PATCH","DELETE","OPTIONS"],
+    "allow_headers": ["Content-Type","Authorization"],
+}})
 
-# SQLAlchemy
+# ---- DB ----
 connect_args = {"check_same_thread": False} if DB_URL.startswith("sqlite") else {}
 engine = create_engine(DB_URL, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = scoped_session(sessionmaker(bind=engine))
 Base = declarative_base()
 
-# -------------------------
-# Modello
-# -------------------------
-VALID_STATUSES = ("todo", "in_progress", "done")
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, nullable=False)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    is_verified = Column(Boolean, default=True)  # registrazione senza email: subito verificato
+    created_at = Column(DateTime, default=datetime.utcnow)
+    tasks = relationship("Task", backref="user", cascade="all,delete")
 
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="todo")  # todo|in_progress|done
@@ -47,22 +52,31 @@ class Task(Base):
 
 Base.metadata.create_all(engine)
 
-# -------------------------
-# Helpers
-# -------------------------
-def require_api_key():
-    key = request.headers.get("X-API-KEY")
-    if key != API_KEY:
-        abort(401, description="Invalid API key")
+VALID_STATUSES = ("todo", "in_progress", "done")
 
-@app.before_request
-def _auth():
-    # health/root libere
-    if request.path in ("/", "/health") or request.method == "OPTIONS":
-        return
-    require_api_key()
+# ---- Helpers ----
+def auth_user():
+    """Ritorna (utente, sessione) da Authorization: Bearer <jwt>."""
+    hdr = request.headers.get("Authorization", "")
+    if not hdr.startswith("Bearer "):
+        abort(401)
+    token = hdr.split(" ", 1)[1].strip()
+    try:
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except Exception:
+        abort(401)
+    uid = data.get("uid")
+    session = SessionLocal()
+    try:
+        u = session.get(User, uid)
+        if not u:
+            abort(401)
+        return u, session
+    except:
+        session.close()
+        abort(401)
 
-def tdict(t: Task):
+def t_task(t: Task):
     return {
         "id": t.id,
         "title": t.title,
@@ -73,22 +87,7 @@ def tdict(t: Task):
         "updated_at": t.updated_at.isoformat(),
     }
 
-def normalize_column(session, status: str):
-    """Compatta gli order_index 0..n-1 dentro una colonna."""
-    rows = (
-        session.query(Task)
-        .filter(Task.status == status)
-        .order_by(Task.order_index.asc(), Task.id.asc())
-        .all()
-    )
-    for i, r in enumerate(rows):
-        if r.order_index != i:
-            r.order_index = i
-            r.updated_at = datetime.utcnow()
-
-# -------------------------
-# Routes
-# -------------------------
+# ---- Public routes ----
 @app.get("/")
 def root():
     return jsonify({"service": "noteboard-api", "ok": True})
@@ -97,130 +96,186 @@ def root():
 def health():
     return jsonify({"status": "ok"})
 
-@app.get("/tasks")
-def list_tasks():
+# Register (senza email: utente subito verificato)
+@app.post("/auth/register")
+def register():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    password2 = data.get("password2") or ""
+
+    if not email or not username or not password:
+        abort(400, "missing fields")
+    if password != password2:
+        abort(400, "passwords mismatch")
+
+    # policy password: >=9, almeno un numero e un carattere speciale
+    import re
+    if len(password) < 9 or not re.search(r"\d", password) or not re.search(r"[^A-Za-z0-9]", password):
+        abort(400, "weak password")
+
     session = SessionLocal()
     try:
+        # email o username già esistenti
+        if session.query(User).filter((User.email == email) | (User.username == username)).first():
+            abort(409, "email or username already exists")
+
+        u = User(
+            email=email,
+            username=username,
+            password_hash=pbkdf2_sha256.hash(password),
+            is_verified=True,  # subito verificato
+        )
+        session.add(u)
+        session.commit()
+        return jsonify({"ok": True, "message": "Registrazione completata"})
+    finally:
+        session.close()
+
+# Login
+@app.post("/auth/login")
+def login():
+    data = request.get_json() or {}
+    identifier = (data.get("identifier") or "").strip().lower()  # email o username
+    password = data.get("password") or ""
+
+    session = SessionLocal()
+    try:
+        u = session.query(User).filter(
+            (User.email == identifier) | (User.username == identifier)
+        ).first()
+        if not u or not pbkdf2_sha256.verify(password, u.password_hash):
+            abort(401, "invalid credentials")
+
+        # opzionale: controllo is_verified (sempre True, ma lasciato per futura email)
+        if not u.is_verified:
+            abort(403, "email not verified")
+
+        token = jwt.encode(
+            {"uid": u.id, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)},
+            JWT_SECRET,
+            algorithm="HS256",
+        )
+        return jsonify({"token": token, "user": {"id": u.id, "email": u.email, "username": u.username}})
+    finally:
+        session.close()
+
+@app.get("/me")
+def me():
+    u, session = auth_user()
+    try:
+        return jsonify({"id": u.id, "email": u.email, "username": u.username, "is_verified": u.is_verified})
+    finally:
+        session.close()
+
+# ---- Tasks (auth required) ----
+@app.get("/tasks")
+def list_tasks():
+    u, session = auth_user()
+    try:
         status = request.args.get("status")
-        q = session.query(Task)
+        q = session.query(Task).filter(Task.user_id == u.id)
         if status:
             if status not in VALID_STATUSES:
-                abort(400, description="invalid status")
+                abort(400, "invalid status")
             q = q.filter(Task.status == status)
-        tasks = q.order_by(Task.status, Task.order_index.asc(), Task.id.asc()).all()
-        return jsonify([tdict(t) for t in tasks])
+        rows = q.order_by(Task.status, Task.order_index.asc(), Task.id.asc()).all()
+        return jsonify([t_task(x) for x in rows])
     finally:
         session.close()
 
 @app.post("/tasks")
 def create_task():
+    u, session = auth_user()
     data = request.get_json() or {}
     title = (data.get("title") or "").strip()
     description = (data.get("description") or "").strip()
     status = data.get("status", "todo")
     if not title:
-        abort(400, description="title is required")
+        abort(400, "title required")
     if status not in VALID_STATUSES:
-        abort(400, description="invalid status")
-
-    session = SessionLocal()
+        abort(400, "invalid status")
     try:
-        # ultimo index nella colonna
         last = (
             session.query(Task)
-            .filter(Task.status == status)
+            .filter_by(user_id=u.id, status=status)
             .order_by(Task.order_index.desc())
             .first()
         )
         next_idx = (last.order_index + 1) if last else 0
         t = Task(
+            user_id=u.id,
             title=title,
-            description=description,
+            description=description or None,
             status=status,
             order_index=next_idx,
         )
         session.add(t)
         session.commit()
-        return jsonify(tdict(t)), 201
+        return jsonify(t_task(t)), 201
     finally:
         session.close()
 
 @app.patch("/tasks/<int:task_id>")
 def update_task(task_id):
+    u, session = auth_user()
     data = request.get_json() or {}
-    session = SessionLocal()
     try:
-        t = session.get(Task, task_id)
+        t = session.query(Task).filter_by(id=task_id, user_id=u.id).first()
         if not t:
-            abort(404, description="task not found")
+            abort(404, "task not found")
 
-        # Aggiornamenti consentiti
         if "title" in data:
             new_title = (data["title"] or "").strip()
             if not new_title:
-                abort(400, description="title cannot be empty")
+                abort(400, "title cannot be empty")
             t.title = new_title
 
         if "description" in data:
-            t.description = (data["description"] or "").strip()
+            t.description = (data["description"] or "").strip() or None
 
         if "status" in data:
             new_status = data["status"]
             if new_status not in VALID_STATUSES:
-                abort(400, description="invalid status")
+                abort(400, "invalid status")
             if new_status != t.status:
-                # Spostamento di colonna: assegnalo in coda alla nuova
-                t.status = new_status
                 last = (
                     session.query(Task)
-                    .filter(Task.status == new_status)
+                    .filter_by(user_id=u.id, status=new_status)
                     .order_by(Task.order_index.desc())
                     .first()
                 )
+                t.status = new_status
                 t.order_index = (last.order_index + 1) if last else 0
-                # normalizza la colonna di origine
-                # (facoltativo, per mantenere indici compatti)
-                # normalize_column(session, old_status)  # se salvi old_status prima
 
         if "order_index" in data:
-            try:
-                t.order_index = int(data["order_index"])
-            except Exception:
-                abort(400, description="order_index must be int")
+            t.order_index = int(data["order_index"])
 
         t.updated_at = datetime.utcnow()
         session.commit()
-        return jsonify(tdict(t))
+        return jsonify(t_task(t))
     finally:
         session.close()
 
 @app.post("/tasks/reorder")
 def reorder_tasks():
-    """
-    Body: { "status": "todo|in_progress|done", "ordered_ids": [3,5,1,...] }
-    Reindicizza gli order_index per la colonna indicata, seguendo ordered_ids.
-    """
+    u, session = auth_user()
     data = request.get_json() or {}
     status = data.get("status")
-    ordered_ids = data.get("ordered_ids") or []
-    if status not in VALID_STATUSES or not isinstance(ordered_ids, list):
-        abort(400, description="invalid payload")
-
-    session = SessionLocal()
+    ordered = data.get("ordered_ids") or []
+    if status not in VALID_STATUSES or not isinstance(ordered, list):
+        abort(400, "invalid payload")
     try:
         id_to_task = {
             t.id: t
-            for t in session.query(Task).filter(Task.status == status).all()
+            for t in session.query(Task).filter_by(user_id=u.id, status=status).all()
         }
-        # assegna gli indici solo ai presenti nella colonna
-        for i, tid in enumerate(ordered_ids):
+        for i, tid in enumerate(ordered):
             tid = int(tid)
             if tid in id_to_task:
                 id_to_task[tid].order_index = i
                 id_to_task[tid].updated_at = datetime.utcnow()
-
-        # per sicurezza compatta tutto
-        normalize_column(session, status)
         session.commit()
         return jsonify({"ok": True})
     finally:
@@ -228,24 +283,16 @@ def reorder_tasks():
 
 @app.delete("/tasks/<int:task_id>")
 def delete_task(task_id):
-    session = SessionLocal()
+    u, session = auth_user()
     try:
-        t = session.get(Task, task_id)
+        t = session.query(Task).filter_by(id=task_id, user_id=u.id).first()
         if not t:
-            abort(404, description="task not found")
-        status = t.status
+            abort(404, "task not found")
         session.delete(t)
-        session.commit()
-        # compatta la colonna dopo la cancellazione
-        session = SessionLocal()
-        normalize_column(session, status)
         session.commit()
         return "", 204
     finally:
         session.close()
 
-# -------------------------
-# Entrypoint dev
-# -------------------------
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(debug=True)

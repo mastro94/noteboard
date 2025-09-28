@@ -3,6 +3,8 @@ import Column from './components/Column'
 import useLocalStorage from './hooks/useLocalStorage'
 import { useEffect } from 'react';
 import useDragAndDrop from './hooks/useDragAndDrop'
+import Login from './auth/Login'
+import Register from './auth/Register'
 import { storage, isAPI } from './services'
 import { STATUSES, LABELS, LS_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
@@ -172,6 +174,31 @@ export default function App() {
     }
   }
 
+  /* SignUp, Login and Logout functions */
+
+  const [route, setRoute] = useState(window.location.hash || '#/login')
+  const [auth, setAuth] = useState(()=> {
+    const t = localStorage.getItem('nb_token')
+    return t ? { token: t } : null
+  })
+
+  useEffect(() => {
+    const onHash = () => setRoute(window.location.hash || (auth ? '#/' : '#/login'))
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [auth])
+
+  function onLogin({ token, user }) {
+    setAuth({ token, user })
+    window.location.hash = '#/'
+  }
+  function logout() { localStorage.removeItem('nb_token'); setAuth(null); window.location.hash = '#/login' }
+
+  if (!auth) {
+    if (route.startsWith('#/register')) return <Register />
+    return <Login onLogin={onLogin} />
+  }
+
   
 
 
@@ -202,6 +229,7 @@ export default function App() {
     <div className="container">
       <header className="header">
         <h1>Noteboard</h1>
+        <button className="btn" onClick={logout}>Logout</button>
       </header>
 
       <div className="toolbar">
