@@ -18,7 +18,11 @@ ALLOWED_ORIGINS = os.environ.get(
 ).split(",")
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": [o.strip() for o in ALLOWED_ORIGINS]}})
+CORS(app, resources={r"/*": {
+     "origins": [o.strip() for o in ALLOWED_ORIGINS],
+     "methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+     "allow_headers": ["Content-Type", "X-API-KEY"],
+ }})
 
 # SQLAlchemy
 connect_args = {"check_same_thread": False} if DB_URL.startswith("sqlite") else {}
