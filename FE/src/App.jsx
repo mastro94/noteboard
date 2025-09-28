@@ -1,13 +1,21 @@
 import React, { useMemo, useState } from 'react'
 import Column from './components/Column'
 import useLocalStorage from './hooks/useLocalStorage'
+import { useEffect } from 'react';
 import useDragAndDrop from './hooks/useDragAndDrop'
+import { storage, isAPI } from './services'
 import { STATUSES, LABELS, LS_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
 import './styles.css'
 
 export default function App() {
-  const [tasks, setTasks] = useLocalStorage(LS_KEY, [])
+  const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
+  const [tasksApi, setTasksApi] = useState([])
+
+  // puntatori dinamici in base alla modalità
+  const currentTasks = isAPI ? tasksApi : tasksLocal
+  const setCurrentTasks = isAPI ? setTasksApi : setTasksLocal
+
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
   const [query, setQuery] = useState('')
@@ -15,22 +23,40 @@ export default function App() {
   const [editingTitle, setEditingTitle] = useState('')
   const [editingDesc, setEditingDesc] = useState('')
 
+  useEffect(() => {
+    if (!isAPI) return;
+    (async () => {
+      const data = await storage.listTasks();
+      setTasksApi(data);
+    })();
+  }, []);
+
   const filtered = useMemo(() => {
-    if (!query.trim()) return tasks
+    const base = Array.isArray(currentTasks) ? currentTasks : []
+    if (!query.trim()) return base
     const q = query.toLowerCase()
-    return tasks.filter(t => t.title.toLowerCase().includes(q) || (t.description||'').toLowerCase().includes(q))
-  }, [tasks, query])
+    return base.filter(t =>
+      (t?.title || '').toLowerCase().includes(q) ||
+      (t?.description || '').toLowerCase().includes(q)
+    )
+  }, [currentTasks, query])
 
   const columns = useMemo(() => {
     const by = { todo: [], in_progress: [], done: [] }
-    filtered.forEach(t => by[t.status].push(t))
+    const list = Array.isArray(filtered) ? filtered : []
+    for (const t of list) {
+      const s = t?.status
+      if (s === 'todo' || s === 'in_progress' || s === 'done') {
+        by[s].push(t)
+      }
+    }
     STATUSES.forEach(s => by[s].sort(byIndex))
     return by
   }, [filtered])
 
   const counters = useMemo(() => ({ total: filtered.length }), [filtered])
 
-  const { onCardDragStart, onColumnDragOver, onColumnDrop } = useDragAndDrop(tasks, setTasks)
+  const { onCardDragStart, onColumnDragOver, onColumnDrop } = useDragAndDrop(currentTasks, setCurrentTasks, storage)
 
   function addTask(e) {
     e.preventDefault()
@@ -45,8 +71,26 @@ export default function App() {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
-    setTasks(prev => [...prev, newTask])
+    setCurrentTasks(prev => [...prev, newTask])
     setTitle(''); setDesc('')
+
+    if (isAPI) {
+      // crea su backend, poi sostituisci l'elemento placeholder con quello ufficiale
+      storage.createTask({ title: newTask.title, description: newTask.description, status: 'todo' })
+        .then(created => {
+          setCurrentTasks(curr => {
+            // rimpiazza il placeholder (id locale) con la risposta ufficiale
+            const tmpIdx = curr.findIndex(x => x.title === newTask.title && x.created_at === newTask.created_at)
+            if (tmpIdx >= 0) {
+              const copy = [...curr]
+              copy[tmpIdx] = { ...created }
+              return copy
+            }
+            return curr
+          })
+        })
+        .catch(console.error)
+    }
   }
 
   function startEdit(task){
@@ -55,15 +99,45 @@ export default function App() {
     setEditingDesc(task.description || '')
   }
 
-  function saveEdit(id){
-    setTasks(prev => prev.map(t => t.id===id ? { ...t, title: editingTitle.trim()||t.title, description: editingDesc, updated_at: new Date().toISOString() } : t))
+  function saveEdit(id) {
+    const newTitle = (editingTitle || '').trim()
+    const newDesc  = (editingDesc  || '').trim()
+
+    // Aggiornamento ottimistico in UI
+    setCurrentTasks(prev =>
+      prev.map(t =>
+        t.id === id
+          ? {
+              ...t,
+              title: newTitle || t.title,
+              description: newDesc,
+              updated_at: new Date().toISOString()
+            }
+          : t
+      )
+    )
     setEditingId(null)
+
+    // Persistenza lato API (solo in api mode)
+    if (isAPI) {
+      const payload = {}
+      if (newTitle) payload.title = newTitle
+      payload.description = newDesc
+
+      const numericId = Number(id)
+      const idToSend = Number.isFinite(numericId) ? numericId : id
+      storage.updateTask(idToSend, payload)
+        .catch(err => {
+          console.error("[Noteboard] PATCH /tasks/:id (title/desc) failed:", err)
+        })
+    }
   }
+
 
   function cancelEdit(){ setEditingId(null) }
 
   function removeTask(id){
-    setTasks(prev => {
+    setCurrentTasks(prev => {
       const victim = prev.find(t=>t.id===id)
       const rest = prev.filter(t=>t.id!==id)
       if (victim){
@@ -72,10 +146,14 @@ export default function App() {
       }
       return [...rest]
     })
+
+    if (isAPI) {
+      storage.deleteTask(id).catch(console.error)
+    }
   }
 
   function moveTo(id, targetStatus){
-    setTasks(prev => {
+    setCurrentTasks(prev => {
       const next = prev.map(t => ({ ...t }))
       const i = next.findIndex(t => t.id === id)
       if (i === -1) return prev
@@ -84,15 +162,23 @@ export default function App() {
       next[i].updated_at = new Date().toISOString()
       return normalizeOrder(next)
     })
+
+    if (isAPI) {
+      const numericId = Number(id)
+      const idToSend = Number.isFinite(numericId) ? numericId : id
+      storage.updateTask(idToSend, { status: targetStatus }).catch(err => {
+        console.error("[Noteboard] PATCH /tasks/:id failed on arrow move:", err)
+      })
+    }
   }
 
   
 
 
-  function clearDone(){ setTasks(prev => prev.filter(t=>t.status!=='done')) }
+  function clearDone(){ setCurrentTasks(prev => prev.filter(t=>t.status!=='done')) }
 
   function exportJSON(){
-    const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(currentTasks, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url; a.download = 'kanban-tasks.json'; a.click(); URL.revokeObjectURL(url)
@@ -105,7 +191,7 @@ export default function App() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result)
-        if (Array.isArray(data)) setTasks(normalizeOrder(data))
+        if (Array.isArray(data)) setCurrentTasks(normalizeOrder(data))
       } catch { alert('File JSON non valido') }
     }
     reader.readAsText(file)
@@ -136,9 +222,9 @@ export default function App() {
 
       <div className="board">
         {STATUSES.map(s => (
-          <Column key={s}
+          <Column
             status={s}
-            tasks={columns[s]}
+            tasks={columns?.[s] || []}
             counters={counters}
             onDragOver={onColumnDragOver}
             onDrop={() => onColumnDrop(s)}

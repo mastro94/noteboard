@@ -5,7 +5,7 @@ import { byIndex } from '../utils/helpers'
  * Gestione drag&drop HTML5 per spostare task tra colonne.
  * Restituisce handlers da agganciare a colonne e card.
  */
-export default function useDragAndDrop(tasks, setTasks) {
+export default function useDragAndDrop(tasks, setTasks, storage) {
   const dragItem = useRef(null) // { id, fromStatus }
 
   function onCardDragStart(e, task) {
@@ -40,6 +40,16 @@ export default function useDragAndDrop(tasks, setTasks) {
       return next
     })
     dragItem.current = null
+
+    // Persistenza lato API
+    if (storage?.mode === "api") {
+      const numericId = Number(payload.id)  // per backend SQL
+      const idToSend = Number.isFinite(numericId) ? numericId : payload.id
+      storage.updateTask(idToSend, { status }).catch(err => {
+        console.error("[Noteboard] PATCH /tasks/:id failed after drop:", err)
+      })
+    }
+
   }
 
   return { onCardDragStart, onColumnDragOver, onColumnDrop }
