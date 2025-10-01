@@ -1,7 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Column from './components/Column'
 import useLocalStorage from './hooks/useLocalStorage'
-import { useEffect } from 'react';
 import useDragAndDrop from './hooks/useDragAndDrop'
 import Login from './auth/Login'
 import Register from './auth/Register'
@@ -10,20 +9,15 @@ import { STATUSES, LABELS, LS_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
 import './styles.css'
 
-useEffect(() => {
-  if (!window.location.hash) {
-    window.location.hash = '#/login'
-  }
-}, [])
-
 export default function App() {
   const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
   const [tasksApi, setTasksApi] = useState([])
 
-  // puntatori dinamici in base alla modalità
+  // Storage dinamico
   const currentTasks = isAPI ? tasksApi : tasksLocal
   const setCurrentTasks = isAPI ? setTasksApi : setTasksLocal
 
+  // UI state
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
   const [query, setQuery] = useState('')
@@ -31,6 +25,29 @@ export default function App() {
   const [editingTitle, setEditingTitle] = useState('')
   const [editingDesc, setEditingDesc] = useState('')
 
+  // Routing & auth
+  const [route, setRoute] = useState(window.location.hash || '#/login')
+  const [auth, setAuth] = useState(() => {
+    const t = localStorage.getItem('nb_token')
+    return t ? { token: t } : null
+  })
+
+  // 1) Su Pages arrivi spesso senza hash: forza #/login al primo load
+  useEffect(() => {
+    if (!window.location.hash) {
+      window.location.hash = '#/login'
+      setRoute('#/login')
+    }
+  }, [])
+
+  // 2) Aggiorna route sui cambi hash
+  useEffect(() => {
+    const onHash = () => setRoute(window.location.hash || (auth ? '#/' : '#/login'))
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [auth])
+
+  // 3) Carica i task SOLO se sei in API mode e loggato
   useEffect(() => {
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
@@ -47,8 +64,114 @@ export default function App() {
     })()
 
     return () => { abort = true }
-  }, [isAPI, auth]);
+  }, [isAPI, auth])
 
+  // ---- Actions ----
+  function addTask(e) {
+    e.preventDefault()
+    const t = title.trim()
+    if (!t) return
+    const newTask = {
+      id: uid(),
+      title: t,
+      description: desc.trim(),
+      status: 'todo',
+      order_index: (Array.isArray(columns.todo) ? columns.todo.length : 0),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setCurrentTasks(prev => [...prev, newTask])
+    setTitle(''); setDesc('')
+
+    if (isAPI) {
+      storage.createTask({ title: newTask.title, description: newTask.description, status: 'todo' })
+        .then(created => {
+          setCurrentTasks(curr => {
+            const tmpIdx = curr.findIndex(x => x.title === newTask.title && x.created_at === newTask.created_at)
+            if (tmpIdx >= 0) {
+              const copy = [...curr]
+              copy[tmpIdx] = { ...created }
+              return copy
+            }
+            return curr
+          })
+        })
+        .catch(console.error)
+    }
+  }
+
+  function startEdit(task) {
+    setEditingId(task.id)
+    setEditingTitle(task.title)
+    setEditingDesc(task.description || '')
+  }
+
+  function saveEdit(id) {
+    const newTitle = (editingTitle || '').trim()
+    const newDesc  = (editingDesc  || '').trim()
+
+    // Aggiornamento ottimistico in UI
+    setCurrentTasks(prev =>
+      prev.map(t =>
+        t.id === id
+          ? {
+              ...t,
+              title: newTitle || t.title,
+              description: newDesc,
+              updated_at: new Date().toISOString()
+            }
+          : t
+      )
+    )
+    setEditingId(null)
+
+    // Persistenza lato API
+    if (isAPI) {
+      const payload = {}
+      if (newTitle) payload.title = newTitle
+      payload.description = newDesc
+
+      const numericId = Number(id)
+      const idToSend = Number.isFinite(numericId) ? numericId : id
+      storage.updateTask(idToSend, payload)
+        .catch(err => console.error('[Noteboard] PATCH /tasks/:id (title/desc) failed:', err))
+    }
+  }
+
+  function cancelEdit(){ setEditingId(null) }
+
+  function removeTask(id){
+    setCurrentTasks(prev => {
+      const victim = prev.find(t => t.id === id)
+      const rest = prev.filter(t => t.id !== id)
+      if (victim){
+        const same = rest.filter(t => t.status === victim.status).sort(byIndex)
+        same.forEach((t,i) => t.order_index = i)
+      }
+      return [...rest]
+    })
+    if (isAPI) storage.deleteTask(id).catch(console.error)
+  }
+
+  function moveTo(id, targetStatus){
+    setCurrentTasks(prev => {
+      const next = prev.map(t => ({ ...t }))
+      const i = next.findIndex(t => t.id === id)
+      if (i === -1) return prev
+      if (next[i].status === targetStatus) return prev
+      next[i].status = targetStatus
+      next[i].updated_at = new Date().toISOString()
+      return normalizeOrder(next)
+    })
+    if (isAPI) {
+      const numericId = Number(id)
+      const idToSend = Number.isFinite(numericId) ? numericId : id
+      storage.updateTask(idToSend, { status: targetStatus })
+        .catch(err => console.error('[Noteboard] PATCH /tasks/:id failed on arrow move:', err))
+    }
+  }
+
+  // ---- Filtering / columns ----
   const filtered = useMemo(() => {
     const base = Array.isArray(currentTasks) ? currentTasks : []
     if (!query.trim()) return base
@@ -74,151 +197,28 @@ export default function App() {
 
   const counters = useMemo(() => ({ total: filtered.length }), [filtered])
 
-  const { onCardDragStart, onColumnDragOver, onColumnDrop } = useDragAndDrop(currentTasks, setCurrentTasks, storage)
+  const { onCardDragStart, onColumnDragOver, onColumnDrop } =
+    useDragAndDrop(currentTasks, setCurrentTasks, storage)
 
-  function addTask(e) {
-    e.preventDefault()
-    const t = title.trim()
-    if (!t) return
-    const newTask = {
-      id: uid(),
-      title: t,
-      description: desc.trim(),
-      status: 'todo',
-      order_index: columns.todo.length,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    setCurrentTasks(prev => [...prev, newTask])
-    setTitle(''); setDesc('')
-
-    if (isAPI) {
-      // crea su backend, poi sostituisci l'elemento placeholder con quello ufficiale
-      storage.createTask({ title: newTask.title, description: newTask.description, status: 'todo' })
-        .then(created => {
-          setCurrentTasks(curr => {
-            // rimpiazza il placeholder (id locale) con la risposta ufficiale
-            const tmpIdx = curr.findIndex(x => x.title === newTask.title && x.created_at === newTask.created_at)
-            if (tmpIdx >= 0) {
-              const copy = [...curr]
-              copy[tmpIdx] = { ...created }
-              return copy
-            }
-            return curr
-          })
-        })
-        .catch(console.error)
-    }
-  }
-
-  function startEdit(task){
-    setEditingId(task.id)
-    setEditingTitle(task.title)
-    setEditingDesc(task.description || '')
-  }
-
-  function saveEdit(id) {
-    const newTitle = (editingTitle || '').trim()
-    const newDesc  = (editingDesc  || '').trim()
-
-    // Aggiornamento ottimistico in UI
-    setCurrentTasks(prev =>
-      prev.map(t =>
-        t.id === id
-          ? {
-              ...t,
-              title: newTitle || t.title,
-              description: newDesc,
-              updated_at: new Date().toISOString()
-            }
-          : t
-      )
-    )
-    setEditingId(null)
-
-    // Persistenza lato API (solo in api mode)
-    if (isAPI) {
-      const payload = {}
-      if (newTitle) payload.title = newTitle
-      payload.description = newDesc
-
-      const numericId = Number(id)
-      const idToSend = Number.isFinite(numericId) ? numericId : id
-      storage.updateTask(idToSend, payload)
-        .catch(err => {
-          console.error("[Noteboard] PATCH /tasks/:id (title/desc) failed:", err)
-        })
-    }
-  }
-
-
-  function cancelEdit(){ setEditingId(null) }
-
-  function removeTask(id){
-    setCurrentTasks(prev => {
-      const victim = prev.find(t=>t.id===id)
-      const rest = prev.filter(t=>t.id!==id)
-      if (victim){
-        const same = rest.filter(t=>t.status===victim.status).sort(byIndex)
-        same.forEach((t,i)=> t.order_index=i)
-      }
-      return [...rest]
-    })
-
-    if (isAPI) {
-      storage.deleteTask(id).catch(console.error)
-    }
-  }
-
-  function moveTo(id, targetStatus){
-    setCurrentTasks(prev => {
-      const next = prev.map(t => ({ ...t }))
-      const i = next.findIndex(t => t.id === id)
-      if (i === -1) return prev
-      if (next[i].status === targetStatus) return prev
-      next[i].status = targetStatus
-      next[i].updated_at = new Date().toISOString()
-      return normalizeOrder(next)
-    })
-
-    if (isAPI) {
-      const numericId = Number(id)
-      const idToSend = Number.isFinite(numericId) ? numericId : id
-      storage.updateTask(idToSend, { status: targetStatus }).catch(err => {
-        console.error("[Noteboard] PATCH /tasks/:id failed on arrow move:", err)
-      })
-    }
-  }
-
-  /* SignUp, Login and Logout functions */
-
-  const [route, setRoute] = useState(window.location.hash || '#/login')
-  const [auth, setAuth] = useState(()=> {
-    const t = localStorage.getItem('nb_token')
-    return t ? { token: t } : null
-  })
-
-  useEffect(() => {
-    const onHash = () => setRoute(window.location.hash || (auth ? '#/' : '#/login'))
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [auth])
-
+  // ---- Auth helpers ----
   function onLogin({ token, user }) {
     setAuth({ token, user })
     window.location.hash = '#/'
   }
-  function logout() { localStorage.removeItem('nb_token'); setAuth(null); window.location.hash = '#/login' }
+  function logout() {
+    localStorage.removeItem('nb_token')
+    setAuth(null)
+    window.location.hash = '#/login'
+  }
 
+  // ---- Gating: Login / Register ----
   if (!auth) {
     if (route.startsWith('#/register')) return <Register />
     return <Login onLogin={onLogin} />
   }
 
-  
-
-
-  function clearDone(){ setCurrentTasks(prev => prev.filter(t=>t.status!=='done')) }
+  // ---- UI ----
+  function clearDone(){ setCurrentTasks(prev => prev.filter(t => t.status !== 'done')) }
 
   function exportJSON(){
     const blob = new Blob([JSON.stringify(currentTasks, null, 2)], { type: 'application/json' })
@@ -267,7 +267,9 @@ export default function App() {
       <div className="board">
         {STATUSES.map(s => (
           <Column
+            key={s}
             status={s}
+            label={LABELS[s]}
             tasks={columns?.[s] || []}
             counters={counters}
             onDragOver={onColumnDragOver}
