@@ -2,4 +2,6 @@
 
 *.env
 
+FE/.env.production
+
 BE/noteboard_pythonanywhere_com_wsgi.py
