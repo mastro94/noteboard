@@ -13,7 +13,7 @@ JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "72"))
 DB_URL = os.environ.get("DB_URL", "sqlite:///noteboard.db")
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS",
-    "http://localhost:5173,https://<user>.github.io,https://<user>.github.io/<repo>"
+    "http://localhost:5173,https://mastro94.github.io,https://mastro94.github.io/noteboard"
 ).split(",")]
 
 app = Flask(__name__)

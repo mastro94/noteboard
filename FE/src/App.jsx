@@ -10,6 +10,12 @@ import { STATUSES, LABELS, LS_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
 import './styles.css'
 
+useEffect(() => {
+  if (!window.location.hash) {
+    window.location.hash = '#/login'
+  }
+}, [])
+
 export default function App() {
   const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
   const [tasksApi, setTasksApi] = useState([])
@@ -26,12 +32,22 @@ export default function App() {
   const [editingDesc, setEditingDesc] = useState('')
 
   useEffect(() => {
-    if (!isAPI) return;
-    (async () => {
-      const data = await storage.listTasks();
-      setTasksApi(data);
-    })();
-  }, []);
+    if (!isAPI) return
+    const token = localStorage.getItem('nb_token')
+    if (!token) return
+
+    let abort = false
+    ;(async () => {
+      try {
+        const data = await storage.listTasks()
+        if (!abort) setTasksApi(data)
+      } catch (err) {
+        console.error('[Noteboard] listTasks failed:', err)
+      }
+    })()
+
+    return () => { abort = true }
+  }, [isAPI, auth]);
 
   const filtered = useMemo(() => {
     const base = Array.isArray(currentTasks) ? currentTasks : []
