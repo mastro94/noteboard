@@ -14,6 +14,6 @@ SAFE_PASS = quote_plus(DB_PASS)  # evita problemi con @ : / # ecc.
 os.environ["DB_URL"] = f"mysql+pymysql://{DB_USER}:{SAFE_PASS}@{DB_HOST}/{DB_NAME}"
 
 # (opzionale) origins FE
-os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5173,https://<user>.github.io,https://<user>.github.io/<repo>")
+os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5173,https://mastro94.github.io,https://mastro94.github.io/noteboard")
 
 from app import app as application

@@ -1,33 +1,55 @@
-// Adapter REST per backend Flask su PythonAnywhere
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');        // es. https://<user>.pythonanywhere.com
-const API_KEY  = import.meta.env.VITE_API_KEY;           // stessa chiave del backend
-const headers  = {
-  "Content-Type": "application/json",
-  "X-API-KEY": API_KEY || "",
-};
+const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 
-function authHeader(){
-  const t = localStorage.getItem('nb_token')
-  return t ? { Authorization: `Bearer ${t}` } : {}
+function token() {
+  return localStorage.getItem('nb_token') || ''
 }
 
-async function http(path, opts={}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(opts.headers||{}) },
-    ...opts
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(()=> '')
-    throw new Error(`${res.status} ${text}`)
+async function http(path, { method = 'GET', body, headers = {} } = {}) {
+  const h = {
+    'Content-Type': 'application/json',
+    ...headers,
   }
-  return res.status === 204 ? null : res.json()
+  const t = token()
+  if (t) h['Authorization'] = `Bearer ${t}`
+
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: h,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status} ${res.statusText} - ${txt}`)
+  }
+  // 204 delete
+  if (res.status === 204) return null
+  return res.json()
 }
 
 export const storageApi = {
-  mode: "api",
-  listTasks(){ return http('/tasks') },
-  createTask(payload){ return http('/tasks', { method:'POST', body: JSON.stringify(payload) }) },
-  updateTask(id, payload){ return http(`/tasks/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
-  deleteTask(id){ return http(`/tasks/${id}`, { method:'DELETE' }) },
-  reorderColumn(status, orderedIds){ return http('/tasks/reorder', { method:'POST', body: JSON.stringify({ status, ordered_ids: orderedIds }) }) }
-};
+  mode: 'api',
+
+  async listTasks() {
+    // il backend restituisce solo i task dell'utente del token
+    return http('/tasks')
+  },
+
+  async createTask({ title, description, status = 'todo' }) {
+    return http('/tasks', {
+      method: 'POST',
+      body: { title, description, status },
+    })
+  },
+
+  async updateTask(id, patch) {
+    return http(`/tasks/${id}`, {
+      method: 'PATCH',
+      body: patch,
+    })
+  },
+
+  async deleteTask(id) {
+    return http(`/tasks/${id}`, { method: 'DELETE' })
+  },
+}

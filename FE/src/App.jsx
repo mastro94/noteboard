@@ -13,11 +13,9 @@ export default function App() {
   const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
   const [tasksApi, setTasksApi] = useState([])
 
-  // Storage dinamico
   const currentTasks = isAPI ? tasksApi : tasksLocal
   const setCurrentTasks = isAPI ? setTasksApi : setTasksLocal
 
-  // UI state
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
   const [query, setQuery] = useState('')
@@ -32,7 +30,7 @@ export default function App() {
     return t ? { token: t } : null
   })
 
-  // 1) Su Pages arrivi spesso senza hash: forza #/login al primo load
+  // 1) Forza #/login al primo load (GitHub Pages arriva senza hash)
   useEffect(() => {
     if (!window.location.hash) {
       window.location.hash = '#/login'
@@ -40,14 +38,14 @@ export default function App() {
     }
   }, [])
 
-  // 2) Aggiorna route sui cambi hash
+  // 2) Aggiorna route su hashchange
   useEffect(() => {
     const onHash = () => setRoute(window.location.hash || (auth ? '#/' : '#/login'))
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [auth])
 
-  // 3) Carica i task SOLO se sei in API mode e loggato
+  // 3) Carica i task SOLO se loggato e in API mode
   useEffect(() => {
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
@@ -62,7 +60,6 @@ export default function App() {
         console.error('[Noteboard] listTasks failed:', err)
       }
     })()
-
     return () => { abort = true }
   }, [isAPI, auth])
 
@@ -71,6 +68,12 @@ export default function App() {
     e.preventDefault()
     const t = title.trim()
     if (!t) return
+
+    if (isAPI && !localStorage.getItem('nb_token')) {
+      alert('Devi essere loggato per creare task.')
+      return
+    }
+
     const newTask = {
       id: uid(),
       title: t,
@@ -100,41 +103,16 @@ export default function App() {
     }
   }
 
-  function startEdit(task) {
-    setEditingId(task.id)
-    setEditingTitle(task.title)
-    setEditingDesc(task.description || '')
-  }
+  function startEdit(task){ setEditingId(task.id); setEditingTitle(task.title); setEditingDesc(task.description || '') }
 
   function saveEdit(id) {
     const newTitle = (editingTitle || '').trim()
     const newDesc  = (editingDesc  || '').trim()
-
-    // Aggiornamento ottimistico in UI
-    setCurrentTasks(prev =>
-      prev.map(t =>
-        t.id === id
-          ? {
-              ...t,
-              title: newTitle || t.title,
-              description: newDesc,
-              updated_at: new Date().toISOString()
-            }
-          : t
-      )
-    )
+    setCurrentTasks(prev => prev.map(t => t.id === id ? { ...t, title: newTitle || t.title, description: newDesc, updated_at: new Date().toISOString() } : t))
     setEditingId(null)
-
-    // Persistenza lato API
     if (isAPI) {
-      const payload = {}
-      if (newTitle) payload.title = newTitle
-      payload.description = newDesc
-
-      const numericId = Number(id)
-      const idToSend = Number.isFinite(numericId) ? numericId : id
-      storage.updateTask(idToSend, payload)
-        .catch(err => console.error('[Noteboard] PATCH /tasks/:id (title/desc) failed:', err))
+      const payload = {}; if (newTitle) payload.title = newTitle; payload.description = newDesc
+      const n = Number(id); storage.updateTask(Number.isFinite(n)? n : id, payload).catch(err => console.error('[Noteboard] PATCH /tasks/:id (title/desc) failed:', err))
     }
   }
 
@@ -142,12 +120,9 @@ export default function App() {
 
   function removeTask(id){
     setCurrentTasks(prev => {
-      const victim = prev.find(t => t.id === id)
-      const rest = prev.filter(t => t.id !== id)
-      if (victim){
-        const same = rest.filter(t => t.status === victim.status).sort(byIndex)
-        same.forEach((t,i) => t.order_index = i)
-      }
+      const victim = prev.find(t=>t.id===id)
+      const rest = prev.filter(t=>t.id!==id)
+      if (victim){ rest.filter(t=>t.status===victim.status).sort(byIndex).forEach((t,i)=> t.order_index=i) }
       return [...rest]
     })
     if (isAPI) storage.deleteTask(id).catch(console.error)
@@ -164,9 +139,8 @@ export default function App() {
       return normalizeOrder(next)
     })
     if (isAPI) {
-      const numericId = Number(id)
-      const idToSend = Number.isFinite(numericId) ? numericId : id
-      storage.updateTask(idToSend, { status: targetStatus })
+      const n = Number(id)
+      storage.updateTask(Number.isFinite(n)? n : id, { status: targetStatus })
         .catch(err => console.error('[Noteboard] PATCH /tasks/:id failed on arrow move:', err))
     }
   }
@@ -187,9 +161,7 @@ export default function App() {
     const list = Array.isArray(filtered) ? filtered : []
     for (const t of list) {
       const s = t?.status
-      if (s === 'todo' || s === 'in_progress' || s === 'done') {
-        by[s].push(t)
-      }
+      if (s === 'todo' || s === 'in_progress' || s === 'done') by[s].push(t)
     }
     STATUSES.forEach(s => by[s].sort(byIndex))
     return by
@@ -200,18 +172,22 @@ export default function App() {
   const { onCardDragStart, onColumnDragOver, onColumnDrop } =
     useDragAndDrop(currentTasks, setCurrentTasks, storage)
 
-  // ---- Auth helpers ----
+  // ---- Auth gating ----
   function onLogin({ token, user }) {
     setAuth({ token, user })
     window.location.hash = '#/'
-  }
-  function logout() {
-    localStorage.removeItem('nb_token')
-    setAuth(null)
-    window.location.hash = '#/login'
+
+    // ricarica i task dell’utente appena loggato (solo API mode)
+    if (isAPI) {
+      storage.listTasks()
+        .then(setTasksApi)
+        .catch(err => console.error('[Noteboard] listTasks after login failed:', err))
+    }
   }
 
-  // ---- Gating: Login / Register ----
+
+  function logout(){ localStorage.removeItem('nb_token'); setAuth(null); window.location.hash = '#/login' }
+
   if (!auth) {
     if (route.startsWith('#/register')) return <Register />
     return <Login onLogin={onLogin} />
@@ -219,26 +195,18 @@ export default function App() {
 
   // ---- UI ----
   function clearDone(){ setCurrentTasks(prev => prev.filter(t => t.status !== 'done')) }
-
   function exportJSON(){
     const blob = new Blob([JSON.stringify(currentTasks, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'kanban-tasks.json'; a.click(); URL.revokeObjectURL(url)
+    const a = document.createElement('a'); a.href = url; a.download = 'kanban-tasks.json'; a.click(); URL.revokeObjectURL(url)
   }
-
   function importJSON(ev){
-    const file = ev.target.files?.[0]
-    if (!file) return
+    const f = ev.target.files?.[0]; if (!f) return
     const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result)
-        if (Array.isArray(data)) setCurrentTasks(normalizeOrder(data))
-      } catch { alert('File JSON non valido') }
-    }
-    reader.readAsText(file)
-    ev.target.value = ''
+    reader.onload = () => { try {
+      const data = JSON.parse(reader.result); if (Array.isArray(data)) setCurrentTasks(normalizeOrder(data))
+    } catch { alert('File JSON non valido') } }
+    reader.readAsText(f); ev.target.value = ''
   }
 
   return (

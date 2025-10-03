@@ -1,7 +1,13 @@
-import { storageApi } from "./storageApi";
-import { storageLocal } from "./storageLocal";
+import { storageApi } from './storageApi'
+import { storageLocal } from './storageLocal'
 
-// Se VITE_MODE=api -> usa backend; altrimenti local
-const mode = (import.meta.env.VITE_MODE || "local").toLowerCase();
-export const storage = mode === "api" ? storageApi : storageLocal;
-export const isAPI = storage.mode === "api";
+const mode = (import.meta.env.VITE_MODE || 'local').toLowerCase()
+export const storage = mode === 'api' ? storageApi : storageLocal
+export const isAPI = storage.mode === 'api'
+
+// 🔎 LOG CONFIG
+console.log(
+  '[Noteboard] VITE_MODE =', mode,
+  '→ isAPI =', isAPI,
+  'API_BASE =', import.meta.env.VITE_API_BASE
+)
