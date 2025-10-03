@@ -1,34 +1,51 @@
+// FE/src/auth/Login.jsx
 import React, { useState } from 'react'
-import { authApi } from '../services/auth'
+import { login as apiLogin } from '../services/auth'
 
 export default function Login({ onLogin }) {
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
-  const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  async function submit(e){
+  async function submit(e) {
     e.preventDefault()
-    setErr('')
+    setLoading(true)
     try {
-      const { token, user } = await authApi.login({ identifier, password })
-      localStorage.setItem('nb_token', token)
-      onLogin({ token, user })
-    } catch (e) {
-      setErr('Credenziali errate o email non verificata.')
-      console.error(e)
+      const data = await apiLogin(identifier, password) // { token, user }
+      localStorage.setItem('nb_token', data.token)
+      onLogin?.(data)
+    } catch (err) {
+      console.error(err)
+      alert('Login non riuscito')
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div className="container">
-      <h2>Login</h2>
-      <form className="addForm" onSubmit={submit}>
-        <input className="input" placeholder="Email o username" value={identifier} onChange={e=>setIdentifier(e.target.value)} />
-        <input className="input" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} />
-        <button className="primaryBtn">Entra</button>
+    <div className="authBox">
+      <h2>Accedi</h2>
+      <form onSubmit={submit}>
+        <input
+          className="input"
+          placeholder="Email o username"
+          value={identifier}
+          onChange={e => setIdentifier(e.target.value)}
+        />
+        <input
+          className="input"
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+        />
+        <button className="primaryBtn" type="submit" disabled={loading}>
+          {loading ? '...' : 'Login'}
+        </button>
       </form>
-      {err && <p style={{color:'#dc2626'}}>{err}</p>}
-      <p>Non hai un account? <a href="#/register">Registrati</a></p>
+      <p style={{marginTop:8}}>
+        Non hai un account? <a href="#/register">Registrati</a>
+      </p>
     </div>
   )
 }

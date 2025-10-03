@@ -1,25 +1,40 @@
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
+// FE/src/services/auth.js
+const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 
-async function http(path, opts = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    ...opts,
+function buildUrl(path) {
+  return BASE
+    ? `${BASE}${path.startsWith('/') ? path : '/' + path}`
+    : (path.startsWith('/') ? path : '/' + path)
+}
+
+async function http(path, { method = 'GET', body, headers = {} } = {}) {
+  const h = { 'Content-Type': 'application/json', ...headers }
+  const token = localStorage.getItem('nb_token')
+  if (token) h['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(buildUrl(path), {
+    method,
+    headers: h,
+    body: body ? JSON.stringify(body) : undefined,
   })
+
   if (!res.ok) {
-    const text = await res.text().catch(()=> '')
-    throw new Error(`${res.status} ${text}`)
+    const txt = await res.text().catch(() => '')
+    throw new Error(`${res.status} ${txt || res.statusText}`)
   }
-  return res.headers.get('content-type')?.includes('application/json') ? res.json() : res.text()
+  return res.json()
 }
 
-export const authApi = {
-  async register({ email, username, password, password2 }) {
-    return http('/auth/register', { method: 'POST', body: JSON.stringify({ email, username, password, password2 }) })
-  },
-  async login({ identifier, password }) {
-    return http('/auth/login', { method: 'POST', body: JSON.stringify({ identifier, password }) })
-  },
-  async me(token) {
-    return http('/me', { headers: { Authorization: `Bearer ${token}` } })
-  }
+export async function login(identifier, password) {
+  return http('/auth/login', { method: 'POST', body: { identifier, password } })
 }
+
+export async function register(payload) {
+  return http('/auth/register', { method: 'POST', body: payload })
+}
+
+export async function me() {
+  return http('/me')
+}
+
+console.log('[Noteboard][auth] BASE =', BASE)

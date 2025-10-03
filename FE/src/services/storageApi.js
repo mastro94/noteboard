@@ -1,3 +1,5 @@
+import React from 'react'
+
 const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 
 function token() {
@@ -12,11 +14,15 @@ async function http(path, { method = 'GET', body, headers = {} } = {}) {
   const t = token()
   if (t) h['Authorization'] = `Bearer ${t}`
 
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: h,
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const url = BASE
+  ? `${BASE}${path.startsWith('/') ? path : '/' + path}`
+  : (path.startsWith('/') ? path : '/' + path)
+
+  const res = await fetch(url, {
+      method,
+      headers: h,
+      body: body ? JSON.stringify(body) : undefined,
+    })
 
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
@@ -29,6 +35,8 @@ async function http(path, { method = 'GET', body, headers = {} } = {}) {
 
 export const storageApi = {
   mode: 'api',
+
+  async me() { return http('/me') },
 
   async listTasks() {
     // il backend restituisce solo i task dell'utente del token

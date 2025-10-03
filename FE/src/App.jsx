@@ -7,6 +7,7 @@ import Register from './auth/Register'
 import { storage, isAPI } from './services'
 import { STATUSES, LABELS, LS_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
+import UserAvatar from './components/UserAvatar'
 import './styles.css'
 
 export default function App() {
@@ -29,6 +30,16 @@ export default function App() {
     const t = localStorage.getItem('nb_token')
     return t ? { token: t } : null
   })
+
+  useEffect(() => {
+    const token = localStorage.getItem('nb_token')
+    if (!isAPI || !token) return
+    if (auth?.user) return
+
+    storage.me()
+      .then(user => setAuth(prev => prev ? { ...prev, user } : { token, user }))
+      .catch(err => console.error('[Noteboard] /me failed:', err))
+  }, [isAPI, auth])
 
   // 1) Forza #/login al primo load (GitHub Pages arriva senza hash)
   useEffect(() => {
@@ -213,7 +224,11 @@ export default function App() {
     <div className="container">
       <header className="header">
         <h1>Noteboard</h1>
-        <button className="btn" onClick={logout}>Logout</button>
+
+        <div className="header-right">
+          <UserAvatar user={auth?.user} />
+          <button className="btn" onClick={logout}>Logout</button>
+        </div>
       </header>
 
       <div className="toolbar">
