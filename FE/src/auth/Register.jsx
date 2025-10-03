@@ -37,6 +37,7 @@ export default function Register() {
       </form>
       <p style={{marginTop:8}}>
         Hai già un account? <a href="#/login">Accedi</a>
+
       </p>
     </div>
   )

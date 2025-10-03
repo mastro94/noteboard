@@ -44,7 +44,8 @@ export default function Login({ onLogin }) {
         </button>
       </form>
       <p style={{marginTop:8}}>
-        Non hai un account? <a href="#/register">Registrati</a>
+        Non hai un account? <a href="#/signup">Registrati</a>
+
       </p>
     </div>
   )

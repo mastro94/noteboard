@@ -10,6 +10,12 @@ import { uid, byIndex, normalizeOrder } from './utils/helpers'
 import UserAvatar from './components/UserAvatar'
 import './styles.css'
 
+const ROUTES = {
+  login:  '#/login',
+  signup: '#/signup',
+  board:  '#/board',
+}
+
 export default function App() {
   const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
   const [tasksApi, setTasksApi] = useState([])
@@ -25,38 +31,58 @@ export default function App() {
   const [editingDesc, setEditingDesc] = useState('')
 
   // Routing & auth
-  const [route, setRoute] = useState(window.location.hash || '#/login')
+  const [route, setRoute] = useState(window.location.hash || ROUTES.login)
   const [auth, setAuth] = useState(() => {
     const t = localStorage.getItem('nb_token')
     return t ? { token: t } : null
   })
 
+  // Recupera profilo se ho solo il token (per far funzionare l'avatar dopo refresh)
   useEffect(() => {
     const token = localStorage.getItem('nb_token')
     if (!isAPI || !token) return
     if (auth?.user) return
-
     storage.me()
       .then(user => setAuth(prev => prev ? { ...prev, user } : { token, user }))
       .catch(err => console.error('[Noteboard] /me failed:', err))
   }, [isAPI, auth])
 
-  // 1) Forza #/login al primo load (GitHub Pages arriva senza hash)
+  // Normalizza hash al primo load: mappa i vecchi path ai nuovi e imposta default
   useEffect(() => {
-    if (!window.location.hash) {
-      window.location.hash = '#/login'
-      setRoute('#/login')
+    const hash = window.location.hash
+    const legacyMap = {
+      '#/': ROUTES.board,
+      '#/?': ROUTES.board,
+      '#/register': ROUTES.signup,
     }
-  }, [])
+    const normalized = legacyMap[hash] || hash
 
-  // 2) Aggiorna route su hashchange
+    if (!normalized) {
+      const target = auth ? ROUTES.board : ROUTES.login
+      window.location.hash = target
+      setRoute(target)
+    } else if (normalized !== hash) {
+      window.location.hash = normalized
+      setRoute(normalized)
+    }
+  }, []) // solo on-mount
+
+  // Aggiorna route su hashchange
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash || (auth ? '#/' : '#/login'))
+    const onHash = () => setRoute(window.location.hash || (auth ? ROUTES.board : ROUTES.login))
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [auth])
 
-  // 3) Carica i task SOLO se loggato e in API mode
+  // Se autenticato e sono su login/signup, manda alla board (qualora arrivi manualmente lì)
+  useEffect(() => {
+    if (!auth) return
+    if (route.startsWith(ROUTES.login) || route.startsWith(ROUTES.signup)) {
+      window.location.hash = ROUTES.board
+    }
+  }, [auth, route])
+
+  // Carica i task SOLO se loggato e in API mode
   useEffect(() => {
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
@@ -114,16 +140,24 @@ export default function App() {
     }
   }
 
-  function startEdit(task){ setEditingId(task.id); setEditingTitle(task.title); setEditingDesc(task.description || '') }
+  function startEdit(task){
+    setEditingId(task.id)
+    setEditingTitle(task.title)
+    setEditingDesc(task.description || '')
+  }
 
   function saveEdit(id) {
     const newTitle = (editingTitle || '').trim()
     const newDesc  = (editingDesc  || '').trim()
-    setCurrentTasks(prev => prev.map(t => t.id === id ? { ...t, title: newTitle || t.title, description: newDesc, updated_at: new Date().toISOString() } : t))
+    setCurrentTasks(prev => prev.map(t =>
+      t.id === id ? { ...t, title: newTitle || t.title, description: newDesc, updated_at: new Date().toISOString() } : t
+    ))
     setEditingId(null)
     if (isAPI) {
       const payload = {}; if (newTitle) payload.title = newTitle; payload.description = newDesc
-      const n = Number(id); storage.updateTask(Number.isFinite(n)? n : id, payload).catch(err => console.error('[Noteboard] PATCH /tasks/:id (title/desc) failed:', err))
+      const n = Number(id)
+      storage.updateTask(Number.isFinite(n) ? n : id, payload)
+        .catch(err => console.error('[Noteboard] PATCH /tasks/:id (title/desc) failed:', err))
     }
   }
 
@@ -186,9 +220,7 @@ export default function App() {
   // ---- Auth gating ----
   function onLogin({ token, user }) {
     setAuth({ token, user })
-    window.location.hash = '#/'
-
-    // ricarica i task dell’utente appena loggato (solo API mode)
+    window.location.hash = ROUTES.board
     if (isAPI) {
       storage.listTasks()
         .then(setTasksApi)
@@ -196,11 +228,14 @@ export default function App() {
     }
   }
 
-
-  function logout(){ localStorage.removeItem('nb_token'); setAuth(null); window.location.hash = '#/login' }
+  function logout(){
+    localStorage.removeItem('nb_token')
+    setAuth(null)
+    window.location.hash = ROUTES.login
+  }
 
   if (!auth) {
-    if (route.startsWith('#/register')) return <Register />
+    if (route.startsWith(ROUTES.signup)) return <Register />
     return <Login onLogin={onLogin} />
   }
 
