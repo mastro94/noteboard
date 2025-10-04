@@ -67,22 +67,24 @@ export default function App() {
 
   // 🔄 Firebase → scambio token col BE
   useEffect(() => {
-    // se sei già loggato salta
-    if (localStorage.getItem('nb_token')) return
-    const unsub = watchAuth(async (fbUser) => {
-      if (!fbUser) return
+    // ascolta i cambi auth Firebase
+    const un = watchAuth(async (fbUser) => {
       try {
+        if (!fbUser) {
+          localStorage.removeItem('nb_token')
+          setAuth(null)
+          return
+        }
         const idToken = await getFirebaseIdToken(fbUser)
         const { token, user } = await exchangeFirebaseToken(idToken)
         localStorage.setItem('nb_token', token)
-        // setAuth e redirect
         setAuth({ token, user })
         window.location.hash = '#/board'
       } catch (e) {
         console.error('[Noteboard] exchange firebase token failed', e)
       }
     })
-    return () => unsub()
+    return () => un && un()
   }, [])
 
 

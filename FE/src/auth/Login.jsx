@@ -1,25 +1,18 @@
 import React, { useState } from 'react'
-import { loginEmail, loginGoogle, getFirebaseIdToken } from '../services/firebaseAuth'
-import { exchangeFirebaseToken } from '../services/auth'
+import { loginEmail, loginGoogle } from '../services/firebaseAuth'
 
-export default function Login({ onLogin }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [err, setErr] = useState('')
-  const [loading, setLoading] = useState(false)
+export default function Login() {
+  const [identifier, setIdentifier] = useState('')   // email
+  const [password, setPassword]   = useState('')
+  const [err, setErr]             = useState('')
+  const [loading, setLoading]     = useState(false)
 
-  async function submit(e) {
+  async function submit(e){
     e.preventDefault()
     setErr(''); setLoading(true)
     try {
-      // 1) Firebase email+password
-      const cred = await loginEmail(email.trim(), password)
-      // 2) ID token Firebase
-      const idToken = await getFirebaseIdToken(cred.user)
-      // 3) Scambio sul BE -> JWT app
-      const { token, user } = await exchangeFirebaseToken(idToken)
-      localStorage.setItem('nb_token', token)
-      onLogin?.({ token, user })
+      await loginEmail(identifier.trim(), password)
+      // NIENTE redirect qui: ci pensa watchAuth in App.jsx a scambiare il token e navigare.
     } catch (e) {
       setErr(e?.message || 'Login fallito')
     } finally {
@@ -27,32 +20,26 @@ export default function Login({ onLogin }) {
     }
   }
 
-  async function signInGoogle() {
-    setErr(''); setLoading(true)
+  async function signInWithGoogle(){
+    setErr('')
     try {
-      const cred = await loginGoogle()
-      const idToken = await getFirebaseIdToken(cred.user)
-      const { token, user } = await exchangeFirebaseToken(idToken)
-      localStorage.setItem('nb_token', token)
-      onLogin?.({ token, user })
+      await loginGoogle()
+      // Anche qui: watchAuth farà il resto.
     } catch (e) {
       setErr(e?.message || 'Login Google fallito')
-    } finally {
-      setLoading(false)
     }
   }
 
   return (
     <div className="authCard">
       <h2>Accedi</h2>
-
       <form onSubmit={submit}>
         <input
           className="input"
           type="email"
           placeholder="Email"
-          value={email}
-          onChange={e=>setEmail(e.target.value)}
+          value={identifier}
+          onChange={e=>setIdentifier(e.target.value)}
           required
         />
         <input
@@ -68,15 +55,17 @@ export default function Login({ onLogin }) {
         </button>
       </form>
 
-      <button className="btn" style={{marginTop: 12}} onClick={signInGoogle} disabled={loading}>
-        Accedi con Google
-      </button>
-
-      <div style={{marginTop: 12, fontSize: 14}}>
-        <a href="#/signup">Registrati</a> · <a href="#/reset">Password dimenticata?</a>
+      <div style={{marginTop: 12}}>
+        <button className="btn" onClick={signInWithGoogle}>
+          🔐 Accedi con Google
+        </button>
       </div>
 
       {err && <p className="error" style={{marginTop: 8}}>{err}</p>}
+
+      <div style={{marginTop: 12, fontSize: 14}}>
+        <a href="#/signup">Crea un account</a> · <a href="#/reset">Password dimenticata?</a>
+      </div>
     </div>
   )
 }
