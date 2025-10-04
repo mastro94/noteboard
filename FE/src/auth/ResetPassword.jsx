@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { sendReset } from '../services/firebaseAuth'
+import { resetPassword } from '../services/firebaseAuth'
 
 export default function ResetPassword() {
   const [email, setEmail] = useState('')
@@ -10,7 +10,7 @@ export default function ResetPassword() {
     e.preventDefault()
     setMsg(''); setErr('')
     try {
-      await sendReset(email)
+      await resetPassword(email)
       setMsg('Email inviata! Controlla la tua casella per reimpostare la password.')
     } catch (e) {
       console.error(e)
