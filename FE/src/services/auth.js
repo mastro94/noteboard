@@ -1,17 +1,19 @@
 // FE/src/services/auth.js
-const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 
 async function http(path, { method = 'GET', body, headers = {} } = {}) {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${BASE}${path.startsWith('/') ? path : '/' + path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
     body: body ? JSON.stringify(body) : undefined,
   })
+  const ct = res.headers.get('content-type') || ''
+  const isJson = ct.includes('application/json')
   if (!res.ok) {
-    const txt = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${txt || res.statusText}`)
+    const txt = await (isJson ? res.json().catch(()=>null) : res.text().catch(()=>'')) || ''
+    throw new Error(`${res.status} ${typeof txt === 'string' ? txt : JSON.stringify(txt)}`)
   }
-  return res.json()
+  return isJson ? res.json() : res.text()
 }
 
 export const authApi = {
@@ -29,8 +31,8 @@ export const authApi = {
 }
 
 // 🔄 Scambio idToken Firebase → JWT Noteboard
-export async function exchangeFirebaseToken(id_token) {
-  return http('/auth/firebase', { method: 'POST', body: { id_token } })
+export async function exchangeFirebaseToken(idToken) {
+  return http('/auth/firebase', { method: 'POST', body: { id_token: idToken } })
 }
 
 console.log('[Noteboard][auth] BASE =', BASE)
