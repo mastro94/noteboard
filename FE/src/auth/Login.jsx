@@ -1,12 +1,9 @@
-// FE/src/auth/Login.jsx
 import React, { useState } from 'react'
 import { loginEmail, loginGoogle, getFirebaseIdToken } from '../services/firebaseAuth'
 import { exchangeFirebaseToken } from '../services/auth'
 
 export default function Login({ onLogin }) {
-  console.log('[Login.jsx] build id = 2025-10-04T#1')
-
-  const [identifier, setIdentifier] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,12 +12,14 @@ export default function Login({ onLogin }) {
     e.preventDefault()
     setErr(''); setLoading(true)
     try {
-      await loginEmail(identifier.trim(), password)
-      const idToken = await getFirebaseIdToken()
-      if (!idToken) throw new Error('Impossibile ottenere ID token Firebase')
-      const data = await exchangeFirebaseToken(idToken)
-      localStorage.setItem('nb_token', data.token)
-      onLogin?.(data)
+      // 1) Firebase email+password
+      const cred = await loginEmail(email.trim(), password)
+      // 2) ID token Firebase
+      const idToken = await getFirebaseIdToken(cred.user)
+      // 3) Scambio sul BE -> JWT app
+      const { token, user } = await exchangeFirebaseToken(idToken)
+      localStorage.setItem('nb_token', token)
+      onLogin?.({ token, user })
     } catch (e) {
       setErr(e?.message || 'Login fallito')
     } finally {
@@ -28,15 +27,14 @@ export default function Login({ onLogin }) {
     }
   }
 
-  async function loginWithGoogle() {
+  async function signInGoogle() {
     setErr(''); setLoading(true)
     try {
-      await loginGoogle()
-      const idToken = await getFirebaseIdToken()
-      if (!idToken) throw new Error('Impossibile ottenere ID token Firebase')
-      const data = await exchangeFirebaseToken(idToken)
-      localStorage.setItem('nb_token', data.token)
-      onLogin?.(data)
+      const cred = await loginGoogle()
+      const idToken = await getFirebaseIdToken(cred.user)
+      const { token, user } = await exchangeFirebaseToken(idToken)
+      localStorage.setItem('nb_token', token)
+      onLogin?.({ token, user })
     } catch (e) {
       setErr(e?.message || 'Login Google fallito')
     } finally {
@@ -53,8 +51,8 @@ export default function Login({ onLogin }) {
           className="input"
           type="email"
           placeholder="Email"
-          value={identifier}
-          onChange={(e)=>setIdentifier(e.target.value)}
+          value={email}
+          onChange={e=>setEmail(e.target.value)}
           required
         />
         <input
@@ -62,7 +60,7 @@ export default function Login({ onLogin }) {
           type="password"
           placeholder="Password"
           value={password}
-          onChange={(e)=>setPassword(e.target.value)}
+          onChange={e=>setPassword(e.target.value)}
           required
         />
         <button className="primaryBtn" disabled={loading}>
@@ -70,14 +68,12 @@ export default function Login({ onLogin }) {
         </button>
       </form>
 
-      {/* Bottone Google visibile SEMPRE */}
-      <button className="btn" onClick={loginWithGoogle} disabled={loading} style={{ marginTop: 8 }}>
+      <button className="btn" style={{marginTop: 12}} onClick={signInGoogle} disabled={loading}>
         Accedi con Google
       </button>
 
       <div style={{marginTop: 12, fontSize: 14}}>
-        Non hai un account? <a href="#/signup">Registrati</a> ·
-        <a href="#/reset" style={{ marginLeft: 8 }}>Password dimenticata?</a>
+        <a href="#/signup">Registrati</a> · <a href="#/reset">Password dimenticata?</a>
       </div>
 
       {err && <p className="error" style={{marginTop: 8}}>{err}</p>}

@@ -2,8 +2,8 @@
 import { auth } from './firebase'
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
+  createUserWithEmailAndPassword,   // ⬅️ aggiungi
+  sendEmailVerification,            // ⬅️ aggiungi
   GoogleAuthProvider,
   signInWithPopup,
   onAuthStateChanged,
@@ -11,18 +11,18 @@ import {
   signOut,
 } from 'firebase/auth'
 
-export async function signupEmail(email, password) {
+export async function loginEmail(email, password) {
+  return signInWithEmailAndPassword(auth, email, password)
+}
+
+export async function signupEmail(email, password) {            // ⬅️ nuovo export
   return createUserWithEmailAndPassword(auth, email, password)
 }
 
-export async function sendVerificationEmail(user) {
+export async function sendVerificationEmail(user) {             // ⬅️ nuovo export
   const u = user || auth.currentUser
   if (!u) throw new Error('No user to verify')
   return sendEmailVerification(u)
-}
-
-export async function loginEmail(email, password) {
-  return signInWithEmailAndPassword(auth, email, password)
 }
 
 export async function loginGoogle() {
@@ -30,19 +30,12 @@ export async function loginGoogle() {
   return signInWithPopup(auth, provider)
 }
 
-export function watchAuth(cb) {
-  return onAuthStateChanged(auth, cb)
-}
+export function watchAuth(cb) { return onAuthStateChanged(auth, cb) }
 
 export async function getFirebaseIdToken(user) {
   const u = user || auth.currentUser
   return u?.getIdToken(true)
 }
 
-export async function resetPassword(email) {
-  return sendPasswordResetEmail(auth, email)
-}
-
-export async function logoutFirebase() {
-  return signOut(auth)
-}
+export async function resetPassword(email) { return sendPasswordResetEmail(auth, email) }
+export async function logoutFirebase() { return signOut(auth) }
