@@ -6,22 +6,66 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, B
 from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session, relationship
 from passlib.hash import pbkdf2_sha256
 
+import firebase_admin
+from firebase_admin import auth as fb_auth, credentials as fb_credentials
+
 # ---- Config ----
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secret")
 JWT_SECRET = os.environ.get("JWT_SECRET", "change-jwt-secret")
 JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "72"))
 DB_URL = os.environ.get("DB_URL", "sqlite:///noteboard.db")
+
+FIREBASE_CREDENTIALS = os.environ.get("FIREBASE_CREDENTIALS_JSON", "")
+FIREBASE_PROJECT_ID  = os.environ.get("FIREBASE_PROJECT_ID", "")
+
+# ⚠️ Definisci PRIMA gli origins
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS",
     "http://localhost:5173,https://mastro94.github.io,https://mastro94.github.io/noteboard"
 ).split(",")]
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {
-    "origins": ALLOWED_ORIGINS,
-    "methods": ["GET","POST","PATCH","DELETE","OPTIONS"],
-    "allow_headers": ["Content-Type","Authorization"],
-}})
+
+# ✅ CORS robusto: autorizza origins, headers e metodi usati
+CORS(
+    app,
+    origins=ALLOWED_ORIGINS,
+    methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    supports_credentials=False  # non usi cookie
+)
+
+# ✅ Preflight esplicito per *tutte* le route
+@app.before_request
+def _cors_preflight():
+    if request.method == "OPTIONS":
+        resp = app.make_response(("", 204))
+        origin = request.headers.get("Origin", "")
+        if origin in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
+        return resp
+
+# ✅ Header CORS anche su 4xx/5xx
+@app.after_request
+def _cors_headers(resp):
+    origin = request.headers.get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
+    return resp
+
+# ---- FIREBASE ----
+if not firebase_admin._apps:
+    if FIREBASE_CREDENTIALS:
+        cred = fb_credentials.Certificate(FIREBASE_CREDENTIALS)
+        firebase_admin.initialize_app(cred, {"projectId": FIREBASE_PROJECT_ID or None})
+    else:
+        firebase_admin.initialize_app()
 
 # ---- DB ----
 connect_args = {"check_same_thread": False} if DB_URL.startswith("sqlite") else {}
@@ -35,7 +79,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False)
     username = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    is_verified = Column(Boolean, default=True)  # registrazione senza email: subito verificato
+    is_verified = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     tasks = relationship("Task", backref="user", cascade="all,delete")
 
@@ -96,7 +140,7 @@ def root():
 def health():
     return jsonify({"status": "ok"})
 
-# Register (senza email: utente subito verificato)
+# ---- Email/pwd (legacy, subito verificato) ----
 @app.post("/auth/register")
 def register():
     data = request.get_json() or {}
@@ -110,14 +154,12 @@ def register():
     if password != password2:
         abort(400, "passwords mismatch")
 
-    # policy password: >=9, almeno un numero e un carattere speciale
     import re
     if len(password) < 9 or not re.search(r"\d", password) or not re.search(r"[^A-Za-z0-9]", password):
         abort(400, "weak password")
 
     session = SessionLocal()
     try:
-        # email o username già esistenti
         if session.query(User).filter((User.email == email) | (User.username == username)).first():
             abort(409, "email or username already exists")
 
@@ -125,7 +167,7 @@ def register():
             email=email,
             username=username,
             password_hash=pbkdf2_sha256.hash(password),
-            is_verified=True,  # subito verificato
+            is_verified=True,
         )
         session.add(u)
         session.commit()
@@ -133,7 +175,6 @@ def register():
     finally:
         session.close()
 
-# Login
 @app.post("/auth/login")
 def login():
     data = request.get_json() or {}
@@ -148,7 +189,6 @@ def login():
         if not u or not pbkdf2_sha256.verify(password, u.password_hash):
             abort(401, "invalid credentials")
 
-        # opzionale: controllo is_verified (sempre True, ma lasciato per futura email)
         if not u.is_verified:
             abort(403, "email not verified")
 
@@ -291,6 +331,53 @@ def delete_task(task_id):
         session.delete(t)
         session.commit()
         return "", 204
+    finally:
+        session.close()
+
+# ---- Firebase token exchange ----
+@app.post("/auth/firebase")
+def auth_from_firebase():
+    data = request.get_json() or {}
+    id_token = data.get("id_token")
+    if not id_token:
+        abort(400, "missing id_token")
+    try:
+        decoded = fb_auth.verify_id_token(id_token)
+    except Exception:
+        abort(401, "invalid firebase token")
+
+    email = (decoded.get("email") or "").lower()
+    if not email:
+        abort(400, "email missing in firebase token")
+
+    username_guess = (decoded.get("name") or email.split("@")[0])[:50]
+    email_verified = bool(decoded.get("email_verified"))
+
+    session = SessionLocal()
+    try:
+        u = session.query(User).filter(User.email == email).first()
+        if not u:
+            u = User(
+                email=email,
+                username=username_guess,
+                password_hash=pbkdf2_sha256.hash(os.urandom(16).hex()),
+                is_verified=email_verified,
+            )
+            session.add(u); session.commit()
+        else:
+            if email_verified and not u.is_verified:
+                u.is_verified = True
+                session.commit()
+
+        token = jwt.encode({
+            "uid": u.id,
+            "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)
+        }, JWT_SECRET, algorithm="HS256")
+
+        return jsonify({
+            "token": token,
+            "user": {"id": u.id, "email": u.email, "username": u.username, "is_verified": u.is_verified}
+        })
     finally:
         session.close()
 

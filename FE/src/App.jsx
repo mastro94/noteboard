@@ -4,9 +4,12 @@ import useLocalStorage from './hooks/useLocalStorage'
 import useDragAndDrop from './hooks/useDragAndDrop'
 import Login from './auth/Login'
 import Register from './auth/Register'
+import ResetPassword from './auth/ResetPassword'
 import { storage, isAPI } from './services'
 import { STATUSES, LABELS, LS_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
+import { watchAuth, getFirebaseIdToken, logoutFirebase } from './services/firebaseAuth'
+import { exchangeFirebaseToken } from './services/auth'
 import UserAvatar from './components/UserAvatar'
 import './styles.css'
 
@@ -14,12 +17,12 @@ const ROUTES = {
   login:  '#/login',
   signup: '#/signup',
   board:  '#/board',
+  reset:  '#/reset',
 }
 
 export default function App() {
   const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
   const [tasksApi, setTasksApi] = useState([])
-
   const currentTasks = isAPI ? tasksApi : tasksLocal
   const setCurrentTasks = isAPI ? setTasksApi : setTasksLocal
 
@@ -30,57 +33,61 @@ export default function App() {
   const [editingTitle, setEditingTitle] = useState('')
   const [editingDesc, setEditingDesc] = useState('')
 
-  // Routing & auth
   const [route, setRoute] = useState(window.location.hash || ROUTES.login)
   const [auth, setAuth] = useState(() => {
     const t = localStorage.getItem('nb_token')
     return t ? { token: t } : null
   })
 
-  // Recupera profilo se ho solo il token (per far funzionare l'avatar dopo refresh)
-  useEffect(() => {
-    const token = localStorage.getItem('nb_token')
-    if (!isAPI || !token) return
-    if (auth?.user) return
-    storage.me()
-      .then(user => setAuth(prev => prev ? { ...prev, user } : { token, user }))
-      .catch(err => console.error('[Noteboard] /me failed:', err))
-  }, [isAPI, auth])
-
-  // Normalizza hash al primo load: mappa i vecchi path ai nuovi e imposta default
+  // Normalizza hash al primo load (Pages può arrivare senza hash)
   useEffect(() => {
     const hash = window.location.hash
-    const legacyMap = {
-      '#/': ROUTES.board,
-      '#/?': ROUTES.board,
-      '#/register': ROUTES.signup,
-    }
-    const normalized = legacyMap[hash] || hash
+    const legacyMap = { '#/': ROUTES.board, '#/?': ROUTES.board, '#/register': ROUTES.signup }
+    const normalized = legacyMap[hash] || hash || (auth ? ROUTES.board : ROUTES.login)
+    if (normalized !== hash) window.location.hash = normalized
+    setRoute(normalized)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-    if (!normalized) {
-      const target = auth ? ROUTES.board : ROUTES.login
-      window.location.hash = target
-      setRoute(target)
-    } else if (normalized !== hash) {
-      window.location.hash = normalized
-      setRoute(normalized)
-    }
-  }, []) // solo on-mount
-
-  // Aggiorna route su hashchange
+  // Router minimale su hash
   useEffect(() => {
     const onHash = () => setRoute(window.location.hash || (auth ? ROUTES.board : ROUTES.login))
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [auth])
 
-  // Se autenticato e sono su login/signup, manda alla board (qualora arrivi manualmente lì)
+  // 🔄 Firebase → scambio token col BE
   useEffect(() => {
-    if (!auth) return
-    if (route.startsWith(ROUTES.login) || route.startsWith(ROUTES.signup)) {
-      window.location.hash = ROUTES.board
-    }
-  }, [auth, route])
+    const un = watchAuth(async (fbUser) => {
+      try {
+        if (!fbUser) {
+          // logout
+          localStorage.removeItem('nb_token')
+          setAuth(null)
+          setTasksApi([])
+          if (!route.startsWith(ROUTES.login) && !route.startsWith(ROUTES.signup) && !route.startsWith(ROUTES.reset)) {
+            window.location.hash = ROUTES.login
+          }
+          return
+        }
+        // utente loggato su Firebase
+        const idToken = await getFirebaseIdToken()
+        if (!idToken) return
+
+        const session = await exchangeFirebaseToken(idToken) // { token, user }
+        localStorage.setItem('nb_token', session.token)
+        setAuth({ token: session.token, user: session.user })
+
+        if (route.startsWith(ROUTES.login) || route.startsWith(ROUTES.signup) || route.startsWith(ROUTES.reset)) {
+          window.location.hash = ROUTES.board
+        }
+      } catch (err) {
+        console.error('[Noteboard] exchange firebase token failed', err)
+      }
+    })
+    return () => un()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Carica i task SOLO se loggato e in API mode
   useEffect(() => {
@@ -98,6 +105,16 @@ export default function App() {
       }
     })()
     return () => { abort = true }
+  }, [isAPI, auth])
+
+  // Recupera profilo se ho solo il token (per avatar dopo refresh)
+  useEffect(() => {
+    const token = localStorage.getItem('nb_token')
+    if (!isAPI || !token) return
+    if (auth?.user) return
+    storage.me()
+      .then(user => setAuth(prev => prev ? { ...prev, user } : { token, user }))
+      .catch(err => console.error('[Noteboard] /me failed:', err))
   }, [isAPI, auth])
 
   // ---- Actions ----
@@ -213,22 +230,12 @@ export default function App() {
   }, [filtered])
 
   const counters = useMemo(() => ({ total: filtered.length }), [filtered])
-
   const { onCardDragStart, onColumnDragOver, onColumnDrop } =
     useDragAndDrop(currentTasks, setCurrentTasks, storage)
 
   // ---- Auth gating ----
-  function onLogin({ token, user }) {
-    setAuth({ token, user })
-    window.location.hash = ROUTES.board
-    if (isAPI) {
-      storage.listTasks()
-        .then(setTasksApi)
-        .catch(err => console.error('[Noteboard] listTasks after login failed:', err))
-    }
-  }
-
-  function logout(){
+  async function logout(){
+    await logoutFirebase().catch(()=>{})
     localStorage.removeItem('nb_token')
     setAuth(null)
     window.location.hash = ROUTES.login
@@ -236,7 +243,8 @@ export default function App() {
 
   if (!auth) {
     if (route.startsWith(ROUTES.signup)) return <Register />
-    return <Login onLogin={onLogin} />
+    if (route.startsWith(ROUTES.reset))  return <ResetPassword />
+    return <Login />
   }
 
   // ---- UI ----
@@ -259,7 +267,6 @@ export default function App() {
     <div className="container">
       <header className="header">
         <h1>Noteboard</h1>
-
         <div className="header-right">
           <UserAvatar user={auth?.user} />
           <button className="btn" onClick={logout}>Logout</button>

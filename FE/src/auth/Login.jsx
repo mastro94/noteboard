@@ -1,52 +1,47 @@
-// FE/src/auth/Login.jsx
 import React, { useState } from 'react'
-import { login as apiLogin } from '../services/auth'
+import { loginEmail, loginGoogle } from '../services/firebaseAuth'
 
-export default function Login({ onLogin }) {
+export default function Login() {
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
 
-  async function submit(e) {
+  async function submit(e){
     e.preventDefault()
-    setLoading(true)
+    setErr('')
     try {
-      const data = await apiLogin(identifier, password) // { token, user }
-      localStorage.setItem('nb_token', data.token)
-      onLogin?.(data)
-    } catch (err) {
-      console.error(err)
-      alert('Login non riuscito')
-    } finally {
-      setLoading(false)
+      // Con Firebase usiamo sempre email, non username
+      await loginEmail(identifier, password)
+      // onAuthStateChanged in App.jsx farà il resto (exchange token + redirect)
+    } catch (e) {
+      console.error(e)
+      setErr(e.message || 'Login fallito')
+    }
+  }
+
+  async function google(){
+    setErr('')
+    try {
+      await loginGoogle()
+    } catch (e) {
+      console.error(e)
+      setErr(e.message || 'Google login fallito')
     }
   }
 
   return (
     <div className="authBox">
-      <h2>Accedi</h2>
+      <h2>Login</h2>
       <form onSubmit={submit}>
-        <input
-          className="input"
-          placeholder="Email o username"
-          value={identifier}
-          onChange={e => setIdentifier(e.target.value)}
-        />
-        <input
-          className="input"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-        />
-        <button className="primaryBtn" type="submit" disabled={loading}>
-          {loading ? '...' : 'Login'}
-        </button>
+        <input className="input" placeholder="Email" value={identifier} onChange={e=>setIdentifier(e.target.value)} />
+        <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+        {err && <div className="error">{err}</div>}
+        <button className="primaryBtn" type="submit">Login</button>
       </form>
-      <p style={{marginTop:8}}>
-        Non hai un account? <a href="#/signup">Registrati</a>
-
-      </p>
+      <button className="btn" onClick={google}>Continua con Google</button>
+      <div className="links">
+        <a href="#/signup">Registrati</a> · <a href="#/reset">Password dimenticata?</a>
+      </div>
     </div>
   )
 }

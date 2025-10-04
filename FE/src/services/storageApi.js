@@ -1,63 +1,28 @@
-import React from 'react'
+// FE/src/services/storageApi.js
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 
-const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-
-function token() {
-  return localStorage.getItem('nb_token') || ''
+function authHeader() {
+  const t = localStorage.getItem('nb_token')
+  return t ? { Authorization: `Bearer ${t}` } : {}
 }
 
-async function http(path, { method = 'GET', body, headers = {} } = {}) {
-  const h = {
-    'Content-Type': 'application/json',
-    ...headers,
-  }
-  const t = token()
-  if (t) h['Authorization'] = `Bearer ${t}`
-
-  const url = BASE
-  ? `${BASE}${path.startsWith('/') ? path : '/' + path}`
-  : (path.startsWith('/') ? path : '/' + path)
-
-  const res = await fetch(url, {
-      method,
-      headers: h,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-
+async function http(path, opts = {}) {
+  const res = await fetch(`${API_BASE}${path.startsWith('/') ? path : '/' + path}`, {
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(opts.headers || {}) },
+    ...opts,
+  })
   if (!res.ok) {
-    const txt = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status} ${res.statusText} - ${txt}`)
+    const text = await res.text().catch(() => '')
+    throw new Error(`${res.status} ${text}`)
   }
-  // 204 delete
-  if (res.status === 204) return null
-  return res.json()
+  return res.status === 204 ? null : res.json()
 }
 
 export const storageApi = {
   mode: 'api',
-
-  async me() { return http('/me') },
-
-  async listTasks() {
-    // il backend restituisce solo i task dell'utente del token
-    return http('/tasks')
-  },
-
-  async createTask({ title, description, status = 'todo' }) {
-    return http('/tasks', {
-      method: 'POST',
-      body: { title, description, status },
-    })
-  },
-
-  async updateTask(id, patch) {
-    return http(`/tasks/${id}`, {
-      method: 'PATCH',
-      body: patch,
-    })
-  },
-
-  async deleteTask(id) {
-    return http(`/tasks/${id}`, { method: 'DELETE' })
-  },
+  listTasks() { return http('/tasks') },
+  createTask(payload) { return http('/tasks', { method:'POST', body: JSON.stringify(payload) }) },
+  updateTask(id, payload) { return http(`/tasks/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
+  deleteTask(id) { return http(`/tasks/${id}`, { method:'DELETE' }) },
+  me() { return http('/me') },
 }

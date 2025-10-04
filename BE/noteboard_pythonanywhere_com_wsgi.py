@@ -14,6 +14,17 @@ SAFE_PASS = quote_plus(DB_PASS)  # evita problemi con @ : / # ecc.
 os.environ["DB_URL"] = f"mysql+pymysql://{DB_USER}:{SAFE_PASS}@{DB_HOST}/{DB_NAME}"
 
 # (opzionale) origins FE
+os.environ["ALLOWED_ORIGINS"] = (
+    "http://localhost:5173,"
+    "http://127.0.0.1:5173,"
+    "https://mastro94.github.io,"
+    "https://mastro94.github.io/noteboard"
+)
 os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5173,https://mastro94.github.io,https://mastro94.github.io/noteboard")
+
+# Firebase
+os.environ["FIREBASE_CREDENTIALS_JSON"] = "/home/noteboard/noteboard-api/firebase-key.json"
+os.environ["FIREBASE_PROJECT_ID"] = "noteboard-dac65"
+
 
 from app import app as application
