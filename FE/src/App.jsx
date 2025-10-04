@@ -82,7 +82,7 @@ export default function App() {
           window.location.hash = ROUTES.board
         }
       } catch (err) {
-        console.error('[Noteboard] exchange firebase token failed', err)
+        console.error('[Noteboard] The exchange firebase token failed', err)
       }
     })
     return () => un()
