@@ -1,4 +1,3 @@
-// FE/src/auth/ResetPassword.jsx
 import React, { useState } from 'react'
 import { resetPassword } from '../services/firebaseAuth'
 
@@ -11,24 +10,24 @@ export default function ResetPassword() {
     e.preventDefault()
     setMsg(''); setErr('')
     try {
-      await resetPassword(email.trim())
-      setMsg('Email di reset inviata (se l’account esiste).')
+      await resetPassword(email)
+      setMsg('Email inviata! Controlla la tua casella per reimpostare la password.')
     } catch (e) {
-      setErr(e?.message || 'Errore nell’invio reset')
+      console.error(e)
+      setErr(e.message || 'Errore invio email reset')
     }
   }
 
   return (
-    <div className="authCard">
-      <h2>Recupero password</h2>
+    <div className="authBox">
+      <h2>Recupera password</h2>
       <form onSubmit={submit}>
-        <input className="input" type="email" placeholder="Email"
-               value={email} onChange={e=>setEmail(e.target.value)} required />
-        <button className="primaryBtn">Invia link</button>
+        <input className="input" placeholder="La tua email" value={email} onChange={e=>setEmail(e.target.value)} />
+        {err && <div className="error">{err}</div>}
+        {msg && <div className="success">{msg}</div>}
+        <button className="primaryBtn" type="submit">Invia link</button>
       </form>
-      {msg && <p className="ok">{msg}</p>}
-      {err && <p className="error">{err}</p>}
-      <div style={{marginTop: 12}}>
+      <div className="links">
         <a href="#/login">Torna al login</a>
       </div>
     </div>

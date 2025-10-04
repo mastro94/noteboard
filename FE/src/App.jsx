@@ -67,24 +67,35 @@ export default function App() {
 
   // 🔄 Firebase → scambio token col BE
   useEffect(() => {
-    // ascolta i cambi auth Firebase
-    const un = watchAuth(async (fbUser) => {
+    const unsub = watchAuth(async (fbUser) => {
       try {
-        if (!fbUser) {
+        if (fbUser) {
+          // Utente Firebase loggato -> scambio token con backend
+          const idToken = await getFirebaseIdToken()
+          if (!idToken) return
+          const { token, user } = await exchangeFirebaseToken(idToken)
+          localStorage.setItem('nb_token', token)
+          setAuth({ token, user })
+          // optional: carica task appena loggato
+          if (isAPI) {
+            storage.listTasks().then(setTasksApi).catch(e => console.error('[Noteboard] listTasks after login failed:', e))
+          }
+          if (!window.location.hash || window.location.hash === '#/' || window.location.hash === ROUTES.login || window.location.hash === ROUTES.signup) {
+            window.location.hash = ROUTES.board
+          }
+        } else {
+          // Logout Firebase -> pulizia
           localStorage.removeItem('nb_token')
           setAuth(null)
-          return
+          if (window.location.hash.startsWith(ROUTES.board)) {
+            window.location.hash = ROUTES.login
+          }
         }
-        const idToken = await getFirebaseIdToken(fbUser)
-        const { token, user } = await exchangeFirebaseToken(idToken)
-        localStorage.setItem('nb_token', token)
-        setAuth({ token, user })
-        window.location.hash = '#/board'
       } catch (e) {
         console.error('[Noteboard] exchange firebase token failed', e)
       }
     })
-    return () => un && un()
+    return () => unsub()
   }, [])
 
 

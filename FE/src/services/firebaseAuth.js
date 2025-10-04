@@ -1,57 +1,46 @@
 // FE/src/services/firebaseAuth.js
-import { auth } from './firebase'
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup,
   onAuthStateChanged,
-  sendPasswordResetEmail,
-  sendEmailVerification,
-  signOut,
 } from 'firebase/auth'
+import { auth } from './firebase'
+import { exchangeFirebaseToken } from './auth'
 
-// Login email/password
+export async function signupEmail(email, password) {
+  return createUserWithEmailAndPassword(auth, email, password)
+}
+
 export async function loginEmail(email, password) {
   return signInWithEmailAndPassword(auth, email, password)
 }
 
-// Login con Google
+export async function resetPassword(email) {
+  return sendPasswordResetEmail(auth, email)
+}
+
 export async function loginGoogle() {
   const provider = new GoogleAuthProvider()
   return signInWithPopup(auth, provider)
 }
 
-// **Signup email/password** (questa mancava!)
-export async function signupEmail(email, password) {
-  return createUserWithEmailAndPassword(auth, email, password)
+// Restituisce una funzione per disiscriversi
+export function watchAuth(onChange) {
+  return onAuthStateChanged(auth, onChange)
 }
 
-// (opzionale) invio email di verifica all'utente loggato
-export async function sendVerificationEmail(user) {
-  const u = user || auth.currentUser
-  if (!u) throw new Error('Nessun utente autenticato')
-  return sendEmailVerification(u)
+// Utility per ottenere l'idToken dell'utente Firebase corrente
+export async function getFirebaseIdToken() {
+  const user = auth.currentUser
+  if (!user) return null
+  return user.getIdToken(/* forceRefresh */ true)
 }
 
-// Reset password
-export async function resetPassword(email) {
-  return sendPasswordResetEmail(auth, email)
-}
-
-// Logout Firebase
+// Logout Firebase (solo client)
 export async function logoutFirebase() {
+  const { signOut } = await import('firebase/auth')
   return signOut(auth)
-}
-
-// Watcher auth → callback(fbUser) su ogni variazione
-export function watchAuth(cb) {
-  return onAuthStateChanged(auth, cb)
-}
-
-// Ottieni l'ID token Firebase per lo scambio col BE
-export async function getFirebaseIdToken(user) {
-  const u = user || auth.currentUser
-  if (!u) return null
-  return u.getIdToken(true) // force refresh
 }

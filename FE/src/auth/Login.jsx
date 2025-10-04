@@ -2,69 +2,45 @@ import React, { useState } from 'react'
 import { loginEmail, loginGoogle } from '../services/firebaseAuth'
 
 export default function Login() {
-  const [identifier, setIdentifier] = useState('')   // email
-  const [password, setPassword]   = useState('')
-  const [err, setErr]             = useState('')
-  const [loading, setLoading]     = useState(false)
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
+  const [err, setErr] = useState('')
 
   async function submit(e){
     e.preventDefault()
-    setErr(''); setLoading(true)
+    setErr('')
     try {
-      await loginEmail(identifier.trim(), password)
-      // NIENTE redirect qui: ci pensa watchAuth in App.jsx a scambiare il token e navigare.
+      // Con Firebase usiamo sempre email, non username
+      await loginEmail(identifier, password)
+      // onAuthStateChanged in App.jsx farà il resto (exchange token + redirect)
     } catch (e) {
-      setErr(e?.message || 'Login fallito')
-    } finally {
-      setLoading(false)
+      console.error(e)
+      setErr(e.message || 'Login fallito')
     }
   }
 
-  async function signInWithGoogle(){
+  async function google(){
     setErr('')
     try {
       await loginGoogle()
-      // Anche qui: watchAuth farà il resto.
     } catch (e) {
-      setErr(e?.message || 'Login Google fallito')
+      console.error(e)
+      setErr(e.message || 'Google login fallito')
     }
   }
 
   return (
-    <div className="authCard">
-      <h2>Accedi</h2>
+    <div className="authBox">
+      <h2>Login</h2>
       <form onSubmit={submit}>
-        <input
-          className="input"
-          type="email"
-          placeholder="Email"
-          value={identifier}
-          onChange={e=>setIdentifier(e.target.value)}
-          required
-        />
-        <input
-          className="input"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e=>setPassword(e.target.value)}
-          required
-        />
-        <button className="primaryBtn" disabled={loading}>
-          {loading ? 'Accesso…' : 'Accedi'}
-        </button>
+        <input className="input" placeholder="Email" value={identifier} onChange={e=>setIdentifier(e.target.value)} />
+        <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+        {err && <div className="error">{err}</div>}
+        <button className="primaryBtn" type="submit">Login</button>
       </form>
-
-      <div style={{marginTop: 12}}>
-        <button className="btn" onClick={signInWithGoogle}>
-          🔐 Accedi con Google
-        </button>
-      </div>
-
-      {err && <p className="error" style={{marginTop: 8}}>{err}</p>}
-
-      <div style={{marginTop: 12, fontSize: 14}}>
-        <a href="#/signup">Crea un account</a> · <a href="#/reset">Password dimenticata?</a>
+      <button className="btn" onClick={google}>Continua con Google</button>
+      <div className="links">
+        <a href="#/signup">Registrati</a> · <a href="#/reset">Password dimenticata?</a>
       </div>
     </div>
   )
