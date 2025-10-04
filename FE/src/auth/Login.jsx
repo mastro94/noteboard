@@ -1,100 +1,47 @@
-import React, { useState, useMemo } from "react";
-import { apiLoginEmailPassword, apiLoginWithFirebaseIdToken } from "../api";
-import { ENABLE_GOOGLE } from "../config";
-import { signInWithGoogleAndGetIdToken, ensureFirebase } from "../auth/firebase";
+import React, { useState } from 'react'
+import { loginEmail, loginGoogle } from '../services/firebaseAuth'
 
-export default function LoginPage() {
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword]   = useState("");
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState("");
+export default function Login() {
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
+  const [err, setErr] = useState('')
 
-  const googleAvailable = useMemo(() => {
+  async function submit(e){
+    e.preventDefault()
+    setErr('')
     try {
-      if (!ENABLE_GOOGLE) return false;
-      return !!ensureFirebase();
-    } catch {
-      return false;
-    }
-  }, []);
-
-  async function onSubmit(e) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const data = await apiLoginEmailPassword(identifier, password);
-      // salva token dove già lo gestisci (localStorage / context)
-      localStorage.setItem("nb_token", data.token);
-      // redirect alla tua home / board
-      window.location.href = "/noteboard/#/boards";
-    } catch (err) {
-      setError(err.message || "Errore di login");
-    } finally {
-      setLoading(false);
+      // Con Firebase usiamo sempre email, non username
+      await loginEmail(identifier, password)
+      // onAuthStateChanged in App.jsx farà il resto (exchange token + redirect)
+    } catch (e) {
+      console.error(e)
+      setErr(e.message || 'Login fallito')
     }
   }
 
-  async function onGoogle() {
-    setError("");
-    setLoading(true);
+  async function google(){
+    setErr('')
     try {
-      const { idToken } = await signInWithGoogleAndGetIdToken();
-      const data = await apiLoginWithFirebaseIdToken(idToken);
-      localStorage.setItem("nb_token", data.token);
-      window.location.href = "/noteboard/#/boards";
-    } catch (err) {
-      setError(err.message || "Errore accesso con Google");
-    } finally {
-      setLoading(false);
+      await loginGoogle()
+    } catch (e) {
+      console.error(e)
+      setErr(e.message || 'Google login fallito')
     }
   }
 
   return (
-    <div style={{maxWidth: 420, margin: "40px auto", padding: 24, border: "1px solid #eee", borderRadius: 12}}>
-      <h2>Accedi a Noteboard</h2>
-
-      <form onSubmit={onSubmit} style={{display: "grid", gap: 12}}>
-        <label>
-          Email o username
-          <input
-            value={identifier}
-            onChange={e => setIdentifier(e.target.value)}
-            required
-            placeholder="email o username"
-            autoComplete="username"
-            style={{width: "100%"}}
-          />
-        </label>
-
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-            placeholder="password"
-            autoComplete="current-password"
-            style={{width: "100%"}}
-          />
-        </label>
-
-        <button disabled={loading} type="submit">
-          {loading ? "Accesso..." : "Accedi"}
-        </button>
+    <div className="authBox">
+      <h2>Login</h2>
+      <form onSubmit={submit}>
+        <input className="input" placeholder="Email" value={identifier} onChange={e=>setIdentifier(e.target.value)} />
+        <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+        {err && <div className="error">{err}</div>}
+        <button className="primaryBtn" type="submit">Login</button>
       </form>
-
-      {googleAvailable && (
-        <>
-          <div style={{textAlign:"center", margin:"12px 0"}}>— oppure —</div>
-          <button disabled={loading} onClick={onGoogle} style={{width:"100%"}}>
-            Continua con Google
-          </button>
-        </>
-      )}
-
-      {error && <p style={{color:"crimson", marginTop: 12}}>{error}</p>}
+      <button className="btn" onClick={google}>Continua con Google</button>
+      <div className="links">
+        <a href="#/signup">Registrati</a> · <a href="#/reset">Password dimenticata?</a>
+      </div>
     </div>
-  );
+  )
 }

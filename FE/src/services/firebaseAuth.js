@@ -1,48 +1,49 @@
 // FE/src/services/firebaseAuth.js
-import { auth } from './firebase'
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  sendEmailVerification,
   GoogleAuthProvider,
   signInWithPopup,
-  onAuthStateChanged,
+  sendEmailVerification,
   sendPasswordResetEmail,
-  signOut,
+  onAuthStateChanged,
 } from 'firebase/auth'
-
-export async function signupEmail(email, password) {
-  return createUserWithEmailAndPassword(auth, email, password)
-}
-
-export async function sendVerificationEmail(user) {
-  const u = user || auth.currentUser
-  if (!u) throw new Error('No user to verify')
-  return sendEmailVerification(u)
-}
+import { auth } from './firebase'
 
 export async function loginEmail(email, password) {
-  return signInWithEmailAndPassword(auth, email, password)
+  const { user } = await signInWithEmailAndPassword(auth, email, password)
+  return user
+}
+
+export async function signupEmail(email, password) {
+  const { user } = await createUserWithEmailAndPassword(auth, email, password)
+  // invia email di verifica (opzionale ma consigliato)
+  try { await sendEmailVerification(user) } catch {}
+  return user
 }
 
 export async function loginGoogle() {
   const provider = new GoogleAuthProvider()
-  return signInWithPopup(auth, provider)
+  const { user } = await signInWithPopup(auth, provider)
+  return user
+}
+
+export async function sendReset(email) {
+  await sendPasswordResetEmail(auth, email)
 }
 
 export function watchAuth(cb) {
+  // cb(user|null) ad ogni variazione
   return onAuthStateChanged(auth, cb)
 }
 
-export async function getFirebaseIdToken(user) {
-  const u = user || auth.currentUser
-  return u?.getIdToken(true)
-}
-
-export async function resetPassword(email) {
-  return sendPasswordResetEmail(auth, email)
+export async function getFirebaseIdToken() {
+  const user = auth.currentUser
+  if (!user) return null
+  return user.getIdToken(/* forceRefresh */ true)
 }
 
 export async function logoutFirebase() {
+  const { signOut } = await import('firebase/auth')
   return signOut(auth)
 }

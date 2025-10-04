@@ -56,53 +56,56 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [auth])
 
-
-  // Normalize hash al primo load
-  useEffect(() => {
-    if (!window.location.hash) {
-      window.location.hash = ROUTES.login
-      setRoute(ROUTES.login)
-    }
-  }, [])
-
   // 🔄 Firebase → scambio token col BE
   useEffect(() => {
-    // se sei già loggato salta
-    if (localStorage.getItem('nb_token')) return
-    const unsub = watchAuth(async (fbUser) => {
-      if (!fbUser) return
+    const un = watchAuth(async (fbUser) => {
       try {
-        const idToken = await getFirebaseIdToken(fbUser)
-        const { token, user } = await exchangeFirebaseToken(idToken)
-        localStorage.setItem('nb_token', token)
-        // setAuth e redirect
-        setAuth({ token, user })
-        window.location.hash = '#/board'
-      } catch (e) {
-        console.error('[Noteboard] exchange firebase token failed', e)
+        if (!fbUser) {
+          // logout
+          localStorage.removeItem('nb_token')
+          setAuth(null)
+          setTasksApi([])
+          if (!route.startsWith(ROUTES.login) && !route.startsWith(ROUTES.signup) && !route.startsWith(ROUTES.reset)) {
+            window.location.hash = ROUTES.login
+          }
+          return
+        }
+        // utente loggato su Firebase
+        const idToken = await getFirebaseIdToken()
+        if (!idToken) return
+
+        const session = await exchangeFirebaseToken(idToken) // { token, user }
+        localStorage.setItem('nb_token', session.token)
+        setAuth({ token: session.token, user: session.user })
+
+        if (route.startsWith(ROUTES.login) || route.startsWith(ROUTES.signup) || route.startsWith(ROUTES.reset)) {
+          window.location.hash = ROUTES.board
+        }
+      } catch (err) {
+        console.error('[Noteboard] exchange firebase token failed', err)
       }
     })
-    return () => unsub()
+    return () => un()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
 
   // Carica i task SOLO se loggato e in API mode
   useEffect(() => {
     if (!isAPI) return
-    const t = localStorage.getItem('nb_token')
-    if (!t) return
+    const token = localStorage.getItem('nb_token')
+    if (!token) return
+
     let abort = false
     ;(async () => {
       try {
         const data = await storage.listTasks()
         if (!abort) setTasksApi(data)
-      } catch (e) {
-        console.error('[Noteboard] listTasks failed:', e)
+      } catch (err) {
+        console.error('[Noteboard] listTasks failed:', err)
       }
     })()
     return () => { abort = true }
   }, [isAPI, auth])
-
 
   // Recupera profilo se ho solo il token (per avatar dopo refresh)
   useEffect(() => {
@@ -237,7 +240,6 @@ export default function App() {
     setAuth(null)
     window.location.hash = ROUTES.login
   }
-
 
   if (!auth) {
     if (route.startsWith(ROUTES.signup)) return <Register />
