@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { loginEmail, loginGoogle } from '../services/firebaseAuth'
+import { loginEmail, loginGoogle, translateAuthError } from '../services/firebaseAuth'
 import { firebaseAvailable } from '../services/firebase'
 
 export default function Login() {
@@ -20,7 +20,8 @@ export default function Login() {
     try {
       await loginEmail(email, password) // onAuthStateChanged farà exchange token + redirect
     } catch (e) {
-      setErr(e?.message || 'Accesso non riuscito')
+      console.error('[LOGIN] Firebase error:', e)
+      setErr(translateAuthError(e))
     } finally {
       setLoading(false)
     }
@@ -32,7 +33,8 @@ export default function Login() {
     try {
       await loginGoogle()
     } catch (e) {
-      setErr(e?.message || 'Accesso Google non riuscito')
+      console.error('[LOGIN][Google] Firebase error:', e)
+      setErr(translateAuthError(e))
     } finally {
       setLoading(false)
     }

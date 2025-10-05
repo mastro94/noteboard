@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { requestPasswordReset } from '../services/firebaseAuth'
+import { requestPasswordReset, translateAuthError } from '../services/firebaseAuth'
 import { firebaseAvailable } from '../services/firebase'
 
 export default function ResetPassword() {
@@ -20,7 +20,8 @@ export default function ResetPassword() {
       await requestPasswordReset(email)
       setOk('Email inviata! Controlla la tua casella per il link di reset.')
     } catch (e) {
-      setErr(e?.message || 'Invio email di reset non riuscito')
+      console.error('[RESET] Firebase error:', e)
+      setErr(translateAuthError(e))
     } finally {
       setLoading(false)
     }

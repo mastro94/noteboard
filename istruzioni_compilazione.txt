@@ -1,0 +1,20 @@
+✅ 1️⃣ Pulisci le build vecchie e la cartella sbagliata
+# vai nella root del progetto
+cd /percorso/del/tuo/progetto
+
+# elimina la vecchia build errata dentro FE
+rm -rf FE/docs FE/dist
+
+✅ 3️⃣ Rigenera la build corretta
+cd FE
+npm install
+npm run build
+
+ls -lah ../docs -> questi file index.html   404.html   assets/   .nojekyll
+
+se mancano: cd ..
+touch docs/.nojekyll
+cp docs/index.html docs/404.html
+
+
+Adesso la build aggiornata sarà creata in ../docs/ (alla radice del repo).

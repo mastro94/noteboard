@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { signupEmail } from '../services/firebaseAuth'
+import { signupEmail, translateAuthError } from '../services/firebaseAuth'
 import { firebaseAvailable } from '../services/firebase'
 
 export default function Register() {
@@ -27,7 +27,8 @@ export default function Register() {
       await signupEmail(email, password) // invio email di verifica (best-effort nel service)
       setOk('Registrazione completata! Ora puoi accedere con la tua email e password.')
     } catch (e) {
-      setErr(e?.message || 'Registrazione non riuscita')
+      console.error('[REGISTER] Firebase error:', e)
+      setErr(translateAuthError(e))
     } finally {
       setLoading(false)
     }

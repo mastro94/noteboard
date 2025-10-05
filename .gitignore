@@ -1,4 +1,8 @@
 FE/.env
 FE/.env.*
 
+FE/docs
+FE/dist
+
 BE
+
