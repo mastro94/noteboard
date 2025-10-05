@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:docs": "vite build && ls -lah docs || true",
+    "build:docs": "vite build && mkdir -p ../docs && (cd ../docs && touch .nojekyll && cp index.html 404.html) && ls -lah ../docs",
     "preview": "vite preview"
   },
   "dependencies": {
