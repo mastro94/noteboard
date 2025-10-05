@@ -2,7 +2,8 @@
 const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 
 async function http(path, { method = 'GET', body, headers = {} } = {}) {
-  const res = await fetch(`${BASE}${path.startsWith('/') ? path : '/' + path}`, {
+  const url = `${BASE}${path.startsWith('/') ? path : '/' + path}`
+  const res = await fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
     body: body ? JSON.stringify(body) : undefined,
@@ -10,19 +11,18 @@ async function http(path, { method = 'GET', body, headers = {} } = {}) {
   const ct = res.headers.get('content-type') || ''
   const isJson = ct.includes('application/json')
   if (!res.ok) {
-    const txt = await (isJson ? res.json().catch(()=>null) : res.text().catch(()=>'')) || ''
-    throw new Error(`${res.status} ${typeof txt === 'string' ? txt : JSON.stringify(txt)}`)
+    const payload = await (isJson ? res.json().catch(() => null) : res.text().catch(() => ''))
+    const msg = typeof payload === 'string' ? payload : JSON.stringify(payload || {})
+    throw new Error(`${res.status} ${msg}`)
   }
   return isJson ? res.json() : res.text()
 }
 
 export const authApi = {
   register({ email, username, password, password2 }) {
-    // legacy: non usato se passi da Firebase, ma lo lasciamo
     return http('/auth/register', { method: 'POST', body: { email, username, password, password2 } })
   },
   login({ identifier, password }) {
-    // legacy: non usato se passi da Firebase
     return http('/auth/login', { method: 'POST', body: { identifier, password } })
   },
   me(token) {
@@ -30,9 +30,8 @@ export const authApi = {
   },
 }
 
-// 🔄 Scambio idToken Firebase → JWT Noteboard
 export async function exchangeFirebaseToken(idToken) {
   return http('/auth/firebase', { method: 'POST', body: { id_token: idToken } })
 }
 
-console.log('[Noteboard][auth] BASE =', BASE)
+console.log('[Noteboard][auth] API_BASE =', BASE)

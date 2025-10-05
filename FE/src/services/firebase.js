@@ -1,5 +1,5 @@
 // FE/src/services/firebase.js
-import { initializeApp } from 'firebase/app'
+import { initializeApp, getApps } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 
 const cfg = {
@@ -10,16 +10,13 @@ const cfg = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
 }
 
-if (!cfg.apiKey) {
-  console.warn('[Firebase] Config mancante: controlla i file .env.*')
+// Inizializza Firebase SOLO se la config è completa
+let app = null
+if (cfg.apiKey && cfg.authDomain && cfg.projectId && cfg.appId) {
+  if (!getApps().length) app = initializeApp(cfg)
+} else {
+  console.warn('[Firebase] Config mancante: il bottone Google verrà nascosto.')
 }
-console.log('[Firebase] cfg:', {
-  apiKey: cfg.apiKey,
-  authDomain: cfg.authDomain,
-  projectId: cfg.projectId,
-  appId: cfg.appId,
-  messagingSenderId: cfg.messagingSenderId,
-})
 
-export const app = initializeApp(cfg)
-export const auth = getAuth(app)
+export const firebaseAvailable = !!app
+export const auth = firebaseAvailable ? getAuth(app) : null
