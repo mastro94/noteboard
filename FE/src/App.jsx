@@ -13,23 +13,17 @@ import { exchangeFirebaseToken } from './services/auth'
 import UserAvatar from './components/UserAvatar'
 import './styles.css'
 
-
-console.log('[NB] route(hash)=', window.location.hash);
-console.log('[NB] token?', !!localStorage.getItem('nb_token'));
-console.log('[NB] VITE_API_BASE=', import.meta.env.VITE_API_BASE);
-console.log('[NB] Firebase cfg]', {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
-});
-
 const ROUTES = {
   login:  '#/login',
   signup: '#/signup',
   board:  '#/board',
   reset:  '#/reset',
 }
+
+// [LOG] avvio app: hash, token, modalità
+console.log('[APP] start. hash=', window.location.hash)
+console.log('[APP] token in LS?', !!localStorage.getItem('nb_token'))
+console.log('[APP] isAPI=', isAPI)
 
 export default function App() {
   const [tasksLocal, setTasksLocal] = useLocalStorage(LS_KEY, [])
@@ -55,6 +49,8 @@ export default function App() {
     const hash = window.location.hash
     const legacyMap = { '#/': ROUTES.board, '#/?': ROUTES.board, '#/register': ROUTES.signup }
     const normalized = legacyMap[hash] || hash || (auth ? ROUTES.board : ROUTES.login)
+    // [LOG] normalizzazione route
+    console.log('[ROUTE] normalize:', { initialHash: hash, normalized, hasToken: !!localStorage.getItem('nb_token') })
     if (normalized !== hash) window.location.hash = normalized
     setRoute(normalized)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -62,15 +58,20 @@ export default function App() {
 
   // Router minimale su hash
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash || (auth ? ROUTES.board : ROUTES.login))
+    const onHash = () => {
+      console.log('[ROUTE] hashchange ->', window.location.hash) // [LOG]
+      setRoute(window.location.hash || (auth ? ROUTES.board : ROUTES.login))
+    }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [auth])
 
   // 🔄 Firebase → scambio token col BE
   useEffect(() => {
+    console.log('[AUTH] watchAuth attached') // [LOG]
     const un = watchAuth(async (fbUser) => {
       try {
+        console.log('[AUTH] onAuthStateChanged ->', fbUser ? { uid: fbUser.uid, email: fbUser.email } : null) // [LOG]
         if (!fbUser) {
           // logout
           localStorage.removeItem('nb_token')
@@ -82,10 +83,13 @@ export default function App() {
           return
         }
         // utente loggato su Firebase
+        console.log('[AUTH] Firebase user present, fetching idToken') // [LOG]
         const idToken = await getFirebaseIdToken()
         if (!idToken) return
 
+        console.log('[AUTH] exchanging idToken with BE', { api: import.meta.env.VITE_API_BASE }) // [LOG]
         const session = await exchangeFirebaseToken(idToken) // { token, user }
+        console.log('[AUTH] exchange OK. user=', session.user) // [LOG]
         localStorage.setItem('nb_token', session.token)
         setAuth({ token: session.token, user: session.user })
 
@@ -93,7 +97,7 @@ export default function App() {
           window.location.hash = ROUTES.board
         }
       } catch (err) {
-        console.error('[Noteboard] exchange firebase token failed', err)
+        console.error('[AUTH] exchange FAILED', err) // [LOG]
       }
     })
     return () => un()
@@ -102,6 +106,7 @@ export default function App() {
 
   // Carica i task SOLO se loggato e in API mode
   useEffect(() => {
+    console.log('[TASKS] loading… isAPI=', isAPI, 'hasToken=', !!localStorage.getItem('nb_token')) // [LOG]
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
     if (!token) return
@@ -110,9 +115,12 @@ export default function App() {
     ;(async () => {
       try {
         const data = await storage.listTasks()
-        if (!abort) setTasksApi(data)
+        if (!abort) {
+          console.log('[TASKS] fetched', Array.isArray(data) ? data.length : data) // [LOG]
+          setTasksApi(data)
+        }
       } catch (err) {
-        console.error('[Noteboard] listTasks failed:', err)
+        console.error('[TASKS] listTasks failed:', err) // [LOG]
       }
     })()
     return () => { abort = true }
@@ -124,8 +132,11 @@ export default function App() {
     if (!isAPI || !token) return
     if (auth?.user) return
     storage.me()
-      .then(user => setAuth(prev => prev ? { ...prev, user } : { token, user }))
-      .catch(err => console.error('[Noteboard] /me failed:', err))
+      .then(user => {
+        console.log('[AUTH] /me OK user=', user) // [LOG]
+        setAuth(prev => prev ? { ...prev, user } : { token, user })
+      })
+      .catch(err => console.error('[AUTH] /me failed:', err)) // [LOG]
   }, [isAPI, auth])
 
   // ---- Actions ----
@@ -164,7 +175,7 @@ export default function App() {
             return curr
           })
         })
-        .catch(console.error)
+        .catch(err => console.error('[TASKS] createTask failed:', err)) // [LOG]
     }
   }
 
@@ -185,7 +196,7 @@ export default function App() {
       const payload = {}; if (newTitle) payload.title = newTitle; payload.description = newDesc
       const n = Number(id)
       storage.updateTask(Number.isFinite(n) ? n : id, payload)
-        .catch(err => console.error('[Noteboard] PATCH /tasks/:id (title/desc) failed:', err))
+        .catch(err => console.error('[TASKS] PATCH /tasks/:id (title/desc) failed:', err)) // [LOG]
     }
   }
 
@@ -198,7 +209,7 @@ export default function App() {
       if (victim){ rest.filter(t=>t.status===victim.status).sort(byIndex).forEach((t,i)=> t.order_index=i) }
       return [...rest]
     })
-    if (isAPI) storage.deleteTask(id).catch(console.error)
+    if (isAPI) storage.deleteTask(id).catch(err => console.error('[TASKS] deleteTask failed:', err)) // [LOG]
   }
 
   function moveTo(id, targetStatus){
@@ -214,7 +225,7 @@ export default function App() {
     if (isAPI) {
       const n = Number(id)
       storage.updateTask(Number.isFinite(n)? n : id, { status: targetStatus })
-        .catch(err => console.error('[Noteboard] PATCH /tasks/:id failed on arrow move:', err))
+        .catch(err => console.error('[TASKS] PATCH /tasks/:id failed on arrow move:', err)) // [LOG]
     }
   }
 

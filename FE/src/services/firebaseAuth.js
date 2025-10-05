@@ -31,8 +31,9 @@ export async function signupEmail(email, password) {
 
 export async function loginGoogle() {
   ensureFirebase()
-  const provider = new GoogleAuthProvider()
-  const { user } = await signInWithPopup(auth, provider)
+  console.log('[FB] signInWithPopup Google')
+  const { user } = await signInWithPopup(auth, new GoogleAuthProvider())
+  console.log('[FB] signInWithPopup OK', { uid: user.uid, email: user.email })
   return user
 }
 
@@ -49,7 +50,11 @@ export async function sendReset(email) {
 
 export function watchAuth(cb) {
   ensureFirebase()
-  return onAuthStateChanged(auth, cb)
+  console.log('[FB] onAuthStateChanged: registering listener')
+  return onAuthStateChanged(auth, (u) => {
+    console.log('[FB] onAuthStateChanged ->', u ? { uid: u.uid, email: u.email } : null)
+    cb(u)
+  })
 }
 
 export async function getFirebaseIdToken() {

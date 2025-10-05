@@ -3,20 +3,32 @@ const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 
 async function http(path, { method = 'GET', body, headers = {} } = {}) {
   const url = `${BASE}${path.startsWith('/') ? path : '/' + path}`
+  console.debug('[HTTP→]', method, url, { body, headers })
+
   const res = await fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json', ...headers },
     body: body ? JSON.stringify(body) : undefined,
+  }).catch(err => {
+    console.error('[HTTP×] network error', method, url, err)
+    throw err
   })
+
+  console.debug('[HTTP←]', res.status, res.statusText, res.url)
   const ct = res.headers.get('content-type') || ''
   const isJson = ct.includes('application/json')
   if (!res.ok) {
     const payload = await (isJson ? res.json().catch(() => null) : res.text().catch(() => ''))
+    console.error('[HTTP!] error payload:', payload)
     const msg = typeof payload === 'string' ? payload : JSON.stringify(payload || {})
     throw new Error(`${res.status} ${msg}`)
   }
-  return isJson ? res.json() : res.text()
+  const payload = isJson ? await res.json() : await res.text()
+  console.debug('[HTTP✓] payload:', payload)
+  return payload
 }
+
+
 
 export const authApi = {
   register({ email, username, password, password2 }) {

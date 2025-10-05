@@ -20,3 +20,5 @@ if (cfg.apiKey && cfg.authDomain && cfg.projectId && cfg.appId) {
 
 export const firebaseAvailable = !!app
 export const auth = firebaseAvailable ? getAuth(app) : null
+
+console.log('[FB] available=', !!app, 'projectId=', cfg.projectId, 'authDomain=', cfg.authDomain)
