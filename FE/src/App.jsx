@@ -13,6 +13,17 @@ import { exchangeFirebaseToken } from './services/auth'
 import UserAvatar from './components/UserAvatar'
 import './styles.css'
 
+
+console.log('[NB] route(hash)=', window.location.hash);
+console.log('[NB] token?', !!localStorage.getItem('nb_token'));
+console.log('[NB] VITE_API_BASE=', import.meta.env.VITE_API_BASE);
+console.log('[NB] Firebase cfg]', {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+});
+
 const ROUTES = {
   login:  '#/login',
   signup: '#/signup',
