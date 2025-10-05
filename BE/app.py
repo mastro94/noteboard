@@ -1,8 +1,8 @@
-import os, jwt
+import os, json, jwt
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, or_
 from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session, relationship
 from passlib.hash import pbkdf2_sha256
 
@@ -18,24 +18,20 @@ DB_URL = os.environ.get("DB_URL", "sqlite:///noteboard.db")
 FIREBASE_CREDENTIALS = os.environ.get("FIREBASE_CREDENTIALS_JSON", "")
 FIREBASE_PROJECT_ID  = os.environ.get("FIREBASE_PROJECT_ID", "")
 
-# ⚠️ Definisci PRIMA gli origins
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS",
-    "http://localhost:5173,https://mastro94.github.io,https://mastro94.github.io/noteboard"
+    "http://localhost:5173,https://mastro94.github.io"
 ).split(",")]
 
 app = Flask(__name__)
-
-# ✅ CORS robusto: autorizza origins, headers e metodi usati
 CORS(
     app,
     origins=ALLOWED_ORIGINS,
     methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
-    supports_credentials=False  # non usi cookie
+    supports_credentials=False
 )
 
-# ✅ Preflight esplicito per *tutte* le route
 @app.before_request
 def _cors_preflight():
     if request.method == "OPTIONS":
@@ -48,7 +44,6 @@ def _cors_preflight():
             resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
         return resp
 
-# ✅ Header CORS anche su 4xx/5xx
 @app.after_request
 def _cors_headers(resp):
     origin = request.headers.get("Origin", "")
@@ -59,10 +54,15 @@ def _cors_headers(resp):
         resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
     return resp
 
-# ---- FIREBASE ----
+# ---- Firebase Admin ----
 if not firebase_admin._apps:
     if FIREBASE_CREDENTIALS:
-        cred = fb_credentials.Certificate(FIREBASE_CREDENTIALS)
+        cred_payload = None
+        try:
+            cred_payload = json.loads(FIREBASE_CREDENTIALS)  # env contiene JSON
+        except Exception:
+            cred_payload = FIREBASE_CREDENTIALS  # env contiene PATH al file
+        cred = fb_credentials.Certificate(cred_payload)
         firebase_admin.initialize_app(cred, {"projectId": FIREBASE_PROJECT_ID or None})
     else:
         firebase_admin.initialize_app()
@@ -75,32 +75,30 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    email = Column(String(255), unique=True, nullable=False)
-    username = Column(String(50), unique=True, nullable=False)
+    id            = Column(Integer, primary_key=True)
+    email         = Column(String(255), unique=True, nullable=False)
+    username      = Column(String(50),  unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    is_verified = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    tasks = relationship("Task", backref="user", cascade="all,delete")
+    is_verified   = Column(Boolean, default=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    tasks         = relationship("Task", backref="user", cascade="all,delete")
 
 class Task(Base):
     __tablename__ = "tasks"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    title = Column(String(200), nullable=False)
+    id          = Column(Integer, primary_key=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title       = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    status = Column(String(20), nullable=False, default="todo")  # todo|in_progress|done
+    status      = Column(String(20), nullable=False, default="todo")
     order_index = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(engine)
-
 VALID_STATUSES = ("todo", "in_progress", "done")
 
 # ---- Helpers ----
 def auth_user():
-    """Ritorna (utente, sessione) da Authorization: Bearer <jwt>."""
     hdr = request.headers.get("Authorization", "")
     if not hdr.startswith("Bearer "):
         abort(401)
@@ -116,7 +114,7 @@ def auth_user():
         if not u:
             abort(401)
         return u, session
-    except:
+    except Exception:
         session.close()
         abort(401)
 
@@ -131,7 +129,7 @@ def t_task(t: Task):
         "updated_at": t.updated_at.isoformat(),
     }
 
-# ---- Public routes ----
+# ---- Public ----
 @app.get("/")
 def root():
     return jsonify({"service": "noteboard-api", "ok": True})
@@ -140,7 +138,7 @@ def root():
 def health():
     return jsonify({"status": "ok"})
 
-# ---- Email/pwd (legacy, subito verificato) ----
+# ---- Email/pwd (BE) ----
 @app.post("/auth/register")
 def register():
     data = request.get_json() or {}
@@ -148,7 +146,6 @@ def register():
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     password2 = data.get("password2") or ""
-
     if not email or not username or not password:
         abort(400, "missing fields")
     if password != password2:
@@ -160,9 +157,8 @@ def register():
 
     session = SessionLocal()
     try:
-        if session.query(User).filter((User.email == email) | (User.username == username)).first():
+        if session.query(User).filter(or_(User.email == email, User.username == username)).first():
             abort(409, "email or username already exists")
-
         u = User(
             email=email,
             username=username,
@@ -180,18 +176,13 @@ def login():
     data = request.get_json() or {}
     identifier = (data.get("identifier") or "").strip().lower()  # email o username
     password = data.get("password") or ""
-
     session = SessionLocal()
     try:
-        u = session.query(User).filter(
-            (User.email == identifier) | (User.username == identifier)
-        ).first()
+        u = session.query(User).filter(or_(User.email == identifier, User.username == identifier)).first()
         if not u or not pbkdf2_sha256.verify(password, u.password_hash):
             abort(401, "invalid credentials")
-
         if not u.is_verified:
             abort(403, "email not verified")
-
         token = jwt.encode(
             {"uid": u.id, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)},
             JWT_SECRET,
@@ -201,6 +192,47 @@ def login():
     finally:
         session.close()
 
+# ---- Firebase token exchange ----
+@app.post("/auth/firebase")
+def auth_from_firebase():
+    data = request.get_json() or {}
+    id_token = data.get("id_token")
+    if not id_token:
+        abort(400, "missing id_token")
+    try:
+        decoded = fb_auth.verify_id_token(id_token)
+    except Exception as e:
+        abort(401, f"invalid firebase token: {e}")
+    email = (decoded.get("email") or "").lower()
+    if not email:
+        abort(400, "email missing in firebase token")
+    username_guess = (decoded.get("name") or email.split("@")[0])[:50]
+    email_verified = bool(decoded.get("email_verified"))
+
+    session = SessionLocal()
+    try:
+        u = session.query(User).filter(User.email == email).first()
+        if not u:
+            u = User(
+                email=email,
+                username=username_guess,
+                password_hash=pbkdf2_sha256.hash(os.urandom(16).hex()),
+                is_verified=email_verified,
+            )
+            session.add(u); session.commit()
+        else:
+            if email_verified and not u.is_verified:
+                u.is_verified = True
+                session.commit()
+        token = jwt.encode(
+            {"uid": u.id, "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)},
+            JWT_SECRET, algorithm="HS256"
+        )
+        return jsonify({"token": token, "user": {"id": u.id, "email": u.email, "username": u.username, "is_verified": u.is_verified}})
+    finally:
+        session.close()
+
+# ---- Authed APIs ----
 @app.get("/me")
 def me():
     u, session = auth_user()
@@ -209,7 +241,6 @@ def me():
     finally:
         session.close()
 
-# ---- Tasks (auth required) ----
 @app.get("/tasks")
 def list_tasks():
     u, session = auth_user()
@@ -230,7 +261,7 @@ def create_task():
     u, session = auth_user()
     data = request.get_json() or {}
     title = (data.get("title") or "").strip()
-    description = (data.get("description") or "").strip()
+    description = (data.get("description") or "").strip() or None
     status = data.get("status", "todo")
     if not title:
         abort(400, "title required")
@@ -244,13 +275,7 @@ def create_task():
             .first()
         )
         next_idx = (last.order_index + 1) if last else 0
-        t = Task(
-            user_id=u.id,
-            title=title,
-            description=description or None,
-            status=status,
-            order_index=next_idx,
-        )
+        t = Task(user_id=u.id, title=title, description=description, status=status, order_index=next_idx)
         session.add(t)
         session.commit()
         return jsonify(t_task(t)), 201
@@ -265,16 +290,13 @@ def update_task(task_id):
         t = session.query(Task).filter_by(id=task_id, user_id=u.id).first()
         if not t:
             abort(404, "task not found")
-
         if "title" in data:
             new_title = (data["title"] or "").strip()
             if not new_title:
                 abort(400, "title cannot be empty")
             t.title = new_title
-
         if "description" in data:
             t.description = (data["description"] or "").strip() or None
-
         if "status" in data:
             new_status = data["status"]
             if new_status not in VALID_STATUSES:
@@ -288,10 +310,8 @@ def update_task(task_id):
                 )
                 t.status = new_status
                 t.order_index = (last.order_index + 1) if last else 0
-
         if "order_index" in data:
             t.order_index = int(data["order_index"])
-
         t.updated_at = datetime.utcnow()
         session.commit()
         return jsonify(t_task(t))
@@ -331,53 +351,6 @@ def delete_task(task_id):
         session.delete(t)
         session.commit()
         return "", 204
-    finally:
-        session.close()
-
-# ---- Firebase token exchange ----
-@app.post("/auth/firebase")
-def auth_from_firebase():
-    data = request.get_json() or {}
-    id_token = data.get("id_token")
-    if not id_token:
-        abort(400, "missing id_token")
-    try:
-        decoded = fb_auth.verify_id_token(id_token)
-    except Exception:
-        abort(401, "invalid firebase token")
-
-    email = (decoded.get("email") or "").lower()
-    if not email:
-        abort(400, "email missing in firebase token")
-
-    username_guess = (decoded.get("name") or email.split("@")[0])[:50]
-    email_verified = bool(decoded.get("email_verified"))
-
-    session = SessionLocal()
-    try:
-        u = session.query(User).filter(User.email == email).first()
-        if not u:
-            u = User(
-                email=email,
-                username=username_guess,
-                password_hash=pbkdf2_sha256.hash(os.urandom(16).hex()),
-                is_verified=email_verified,
-            )
-            session.add(u); session.commit()
-        else:
-            if email_verified and not u.is_verified:
-                u.is_verified = True
-                session.commit()
-
-        token = jwt.encode({
-            "uid": u.id,
-            "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)
-        }, JWT_SECRET, algorithm="HS256")
-
-        return jsonify({
-            "token": token,
-            "user": {"id": u.id, "email": u.email, "username": u.username, "is_verified": u.is_verified}
-        })
     finally:
         session.close()
 
