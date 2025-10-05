@@ -1,87 +1,114 @@
 import React, { useState } from 'react'
-import { authApi } from '../services/auth'
 import { signupEmail } from '../services/firebaseAuth'
 import { firebaseAvailable } from '../services/firebase'
 
 export default function Register() {
-  const [tab, setTab] = useState('be') // 'be' | 'fb'
   const [email, setEmail] = useState('')
-  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
-  const [ok, setOk] = useState('')
   const [err, setErr] = useState('')
+  const [ok, setOk] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPwd, setShowPwd] = useState(false)
 
   const strong = (p) => p.length >= 9 && /\d/.test(p) && /[^A-Za-z0-9]/.test(p)
 
-  async function submitBE(e){
+  async function onSubmit(e) {
     e.preventDefault()
     setErr(''); setOk('')
-    if (!strong(password) || password !== password2) {
-      setErr('Password non valida o non coincide'); return
+    if (!firebaseAvailable) {
+      setErr('Firebase non configurato. Imposta le variabili VITE_FIREBASE_* e rifai la build.')
+      return
     }
+    if (password !== password2) { setErr('Le password non coincidono'); return }
+    if (!strong(password)) { setErr('Password debole (min 9, una cifra e un simbolo)'); return }
     setLoading(true)
     try {
-      await authApi.register({ email, username, password, password2 })
-      setOk('Registrazione completata! Ora puoi accedere con Email/Password (BE).')
+      await signupEmail(email, password) // invio email di verifica (best-effort nel service)
+      setOk('Registrazione completata! Ora puoi accedere con la tua email e password.')
     } catch (e) {
-      console.error(e); setErr(e.message || 'Registrazione BE fallita')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function submitFB(e){
-    e.preventDefault()
-    setErr(''); setOk('')
-    if (!strong(password) || password !== password2) {
-      setErr('Password non valida o non coincide'); return
-    }
-    setLoading(true)
-    try {
-      await signupEmail(email, password)
-      setOk('Registrazione completata su Firebase! Controlla la verifica email.')
-    } catch (e) {
-      console.error(e); setErr(e.message || 'Registrazione Firebase fallita')
+      setErr(e?.message || 'Registrazione non riuscita')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="authBox">
-      <h2>Registrati</h2>
+    <div className="auth-page" >
+      <div className="auth-card">
+        <h1 className="auth-title">Crea l’account</h1>
+        <p className="auth-subtitle">L’account è gestito da Firebase Authentication.</p>
 
-      <div style={{display:'flex', gap:8, marginBottom:12}}>
-        <button className={tab==='be'?'btnPrimary':'btn'} onClick={()=>setTab('be')}>Backend (Email/Username)</button>
-        <button className={tab==='fb'?'btnPrimary':'btn'} onClick={()=>setTab('fb')}>Firebase</button>
-      </div>
+        <form className="auth-form" onSubmit={onSubmit}>
+          <div>
+            <label className="auth-label" htmlFor="reg-email">Email</label>
+            <div className="auth-input-wrap">
+              <input
+                id="reg-email"
+                className="auth-input"
+                type="email"
+                placeholder="tu@esempio.com"
+                autoComplete="username"
+                value={email}
+                onChange={e=>setEmail(e.target.value)}
+                required
+              />
+            </div>
+          </div>
 
-      {tab==='be' && (
-        <form onSubmit={submitBE} style={{display:'grid', gap:8}}>
-          <input className="input" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-          <input className="input" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} />
-          <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-          <input className="input" placeholder="Conferma Password" type="password" value={password2} onChange={e=>setPassword2(e.target.value)} />
-          <button className="btnPrimary" disabled={loading} type="submit">{loading ? 'Invio…' : 'Registrati (BE)'}</button>
-        </form>
-      )}
+          <div>
+            <label className="auth-label" htmlFor="reg-password">Password</label>
+            <div className="auth-input-wrap">
+              <input
+                id="reg-password"
+                className="auth-input"
+                type={showPwd ? 'text' : 'password'}
+                placeholder="Almeno 9 caratteri, 1 numero, 1 simbolo"
+                autoComplete="new-password"
+                value={password}
+                onChange={e=>setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="auth-eye"
+                onClick={()=>setShowPwd(v=>!v)}
+                aria-label={showPwd ? 'Nascondi password' : 'Mostra password'}
+              >
+                {showPwd ? 'Nascondi' : 'Mostra'}
+              </button>
+            </div>
+          </div>
 
-      {tab==='fb' && (
-        <form onSubmit={submitFB} style={{display:'grid', gap:8}}>
-          {!firebaseAvailable && <div className="hint">Config Firebase mancante (VITE_FIREBASE_*).</div>}
-          <input className="input" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-          <input className="input" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-          <input className="input" placeholder="Conferma Password" type="password" value={password2} onChange={e=>setPassword2(e.target.value)} />
-          <button className="btnPrimary" disabled={loading || !firebaseAvailable} type="submit">
-            {loading ? 'Invio…' : 'Registrati (Firebase)'}
+          <div>
+            <label className="auth-label" htmlFor="reg-password2">Conferma password</label>
+            <div className="auth-input-wrap">
+              <input
+                id="reg-password2"
+                className="auth-input"
+                type={showPwd ? 'text' : 'password'}
+                placeholder="Ripeti la password"
+                autoComplete="new-password"
+                value={password2}
+                onChange={e=>setPassword2(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <button className="auth-btn-primary" disabled={loading || !firebaseAvailable}>
+            {loading ? 'Registrazione…' : 'Registrati'}
           </button>
         </form>
-      )}
 
-      {ok && <div className="ok" style={{marginTop:12}}>{ok}</div>}
-      {err && <div className="error" style={{marginTop:12}}>{err}</div>}
+        {ok && <div className="auth-ok">{ok}</div>}
+        {err && <div className="auth-error">{err}</div>}
+
+        <div className="auth-footer">
+          <a href="#/login" className="auth-link">Hai già un account? Accedi</a>
+          <a href="#/reset" className="auth-link">Password dimenticata?</a>
+        </div>
+      </div>
     </div>
   )
 }
