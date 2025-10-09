@@ -1,6 +1,22 @@
 import React from 'react'
 
-export default function Card({ task, isEditing, editingTitle, setEditingTitle, editingDesc, setEditingDesc, onSaveEdit, onCancelEdit, onEditStart, onRemove, onMoveLeft, onMoveRight, onDragStart, disableLeft, disableRight }) {
+export default function Card({
+  task,
+  isEditing,
+  editingTitle,
+  setEditingTitle,
+  editingDesc,
+  setEditingDesc,
+  onSaveEdit,
+  onCancelEdit,
+  onEditStart,
+  onRemove,
+  onMoveLeft,
+  onMoveRight,
+  onDragStart,
+  disableLeft,
+  disableRight
+}) {
   return (
     <div
       draggable
@@ -21,6 +37,29 @@ export default function Card({ task, isEditing, editingTitle, setEditingTitle, e
         <div>
           <div className="cardTitle">{task.title}</div>
           {task.description && <div className="cardDesc">{task.description}</div>}
+
+          {Array.isArray(task.tags) && task.tags.length > 0 && (
+            <div className="tagsRow" style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {task.tags.map(tag => (
+                <span
+                  key={tag.id}
+                  className="tagChip"
+                  style={{
+                    display: 'inline-block',
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    fontSize: 12,
+                    lineHeight: '18px',
+                    backgroundColor: tag.color || '#e5e7eb',
+                    color: '#111827'
+                  }}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="cardActions">
             <button className="btn" onClick={() => onMoveLeft(task.id)} disabled={disableLeft}>⟵</button>
             <button className="btn" onClick={() => onMoveRight(task.id)} disabled={disableRight}>⟶</button>

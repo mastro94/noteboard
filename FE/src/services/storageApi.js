@@ -25,4 +25,8 @@ export const storageApi = {
   updateTask(id, payload) { return http(`/tasks/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
   deleteTask(id) { return http(`/tasks/${id}`, { method:'DELETE' }) },
   me() { return http('/me') },
+  listTags() { return http('/tags') },
+  createTag(payload) { return http('/tags', { method:'POST', body: JSON.stringify(payload) }) },
+  updateTag(id, payload){ return http(`/tags/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
+  deleteTag(id){ return http(`/tags/${id}`, { method:'DELETE' }) },
 }

@@ -18,4 +18,8 @@ export const storageLocal = {
   async reorderColumn() {
     return { ok: true };
   },
+  async listTags(){ return [] },
+  async createTag(payload){ return { id: crypto.randomUUID ? crypto.randomUUID() : Date.now(), ...payload } },
+  async updateTag(id, payload){ return { id, ...payload } },
+  async deleteTag(){ return true },
 };
