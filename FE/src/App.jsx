@@ -65,6 +65,7 @@ export default function App() {
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]) // default dal preset
   const [selectedTagId, setSelectedTagId] = useState('')            // per associare al NUOVO task (singolo tag)
   const [activeTagFilterId, setActiveTagFilterId] = useState(null)  // filtro toggle
+  const [editingTagId, setEditingTagId] = useState('')
 
   // Normalizza hash al primo load
   useEffect(() => {
@@ -232,17 +233,28 @@ export default function App() {
     setEditingId(task.id)
     setEditingTitle(task.title)
     setEditingDesc(task.description || '')
+    setEditingTagId(String(task?.tags?.[0]?.id ?? ''))
   }
 
   function saveEdit(id) {
     const newTitle = (editingTitle || '').trim()
     const newDesc  = (editingDesc  || '').trim()
-    setCurrentTasks(prev => prev.map(t =>
-      t.id === id ? { ...t, title: newTitle || t.title, description: newDesc, updated_at: new Date().toISOString() } : t
-    ))
+    const chosenTag = tags.find(x => String(x.id) === String(editingTagId))
+    setCurrentTasks(prev => prev.map(t => {
+      if (t.id !== id) return t
+      const updated = {
+        ...t,
+        title: (editingTitle || '').trim() || t.title,
+        description: (editingDesc || '').trim(),
+        updated_at: new Date().toISOString(),
+        tags: chosenTag ? [chosenTag] : []
+      }
+      return updated
+    }))
     setEditingId(null)
     if (isAPI) {
       const payload = {}; if (newTitle) payload.title = newTitle; payload.description = newDesc
+      payload.tag_ids = chosenTag ? [chosenTag.id] : []
       const n = Number(id)
       storage.updateTask(Number.isFinite(n) ? n : id, payload)
         .catch(err => console.error('[TASKS] PATCH title/desc failed:', err))
@@ -488,6 +500,9 @@ export default function App() {
             setEditingDesc={setEditingDesc}
             onSaveEdit={saveEdit}
             onCancelEdit={cancelEdit}
+            editingTagId={editingTagId}
+            setEditingTagId={setEditingTagId}
+            tagsList={tags}
           />
         ))}
       </div>

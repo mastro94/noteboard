@@ -283,3 +283,56 @@
 /* Tag chips */
 .tagsRow { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
 .tagChip { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 18px; color: #111827; }
+
+
+.tagSelectBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.tagSelectBtn:hover { background: #fafafa; }
+
+
+.tagMenu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  max-height: 260px;
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.08);
+  padding: 6px;
+}
+.tagMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.tagMenuItem:hover {
+  background: #f3f4f6;
+}
+
+
+.tagSwatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  display: inline-block;
+  flex: 0 0 16px;
+}
+

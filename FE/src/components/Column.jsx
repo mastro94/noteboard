@@ -22,6 +22,9 @@ export default function Column({
   setEditingDesc,
   onSaveEdit,
   onCancelEdit,
+  editingTagId,
+  setEditingTagId,
+  tagsList
 }) {
   const safeTasks = Array.isArray(tasks) ? tasks : []
   const total = typeof counters?.total === 'number' ? counters.total : safeTasks.length
@@ -55,6 +58,11 @@ export default function Column({
             setEditingDesc={setEditingDesc}
             onSaveEdit={onSaveEdit}
             onCancelEdit={onCancelEdit}
+
+            editingTagId={editingTagId}
+            setEditingTagId={setEditingTagId}
+            tagsList={tagsList}
+
           />
         ))}
       </div>
