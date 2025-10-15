@@ -339,3 +339,88 @@
 .prioBadge {
   font-weight: 500;
 }
+
+
+/* --- Tabs --- */
+.tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  margin: 8px 0 12px;
+}
+.tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 10px 14px;
+  font-weight: 600;
+  color: #6b7280;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+}
+.tab:hover { color: #374151; }
+.tab.active {
+  color: #111827;
+  border-bottom-color: #3b82f6;
+}
+
+/* --- Cards enhancement --- */
+.card {
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.04);
+}
+
+/* --- Tag chips --- */
+.tagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #111827;
+  border: 1px solid rgba(0,0,0,.05);
+}
+.tagChip .tagDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  opacity: .9;
+}
+.tagChip .tagText {
+  font-weight: 600;
+}
+
+/* --- Color picker (swatches) --- */
+.colorPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.colorPicker .swatches {
+  display: grid;
+  grid-template-columns: repeat(10, 20px);
+  gap: 6px;
+}
+.colorPicker .swatch {
+  width: 20px; height: 20px; border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+.colorPicker .swatch.selected { outline: 2px solid #3b82f6; }
+.colorPicker .preview {
+  width: 24px; height: 24px; border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+/* --- Tiny color badge --- */
+.colorBadge {
+  display:inline-block; width:20px; height:20px;
+  border-radius:4px; border:1px solid #e5e7eb;
+}
+
+/* Buttons: arrotonda un filo di più */
+.btn, .warnBtn, .dangerBtn, .primaryBtn { border-radius: 10px; }
+
+/* Chip button piccolo */
+.dangerBtn.small { padding: 2px 6px; font-size: 12px; line-height: 1; }
