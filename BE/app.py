@@ -82,6 +82,8 @@ class User(Base):
     is_verified   = Column(Boolean, default=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
     tasks         = relationship("Task", backref="user", cascade="all,delete")
+    # relazione con i Tag (backref su Tag.user)
+    tags          = relationship("Tag", backref="user", cascade="all,delete")
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -93,8 +95,30 @@ class Task(Base):
     order_index = Column(Integer, nullable=False, default=0)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow)
+    # backref 'tags' è definito su Tag tramite relazione secondaria
 
+# --- Nuovi modelli per i Tag ---
+class TaskTag(Base):
+    __tablename__ = "task_tags"
+    task_id = Column(Integer, ForeignKey("tasks.id"), primary_key=True)
+    tag_id  = Column(Integer, ForeignKey("tags.id"),  primary_key=True)
+    priority   = Column(String(10), nullable=False, default="LOW")
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name       = Column(String(50), nullable=False)
+    color      = Column(String(7), nullable=True)  # es. "#6e56cf"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    # relazione molti-a-molti con Task
+    tasks = relationship("Task", secondary="task_tags", backref="tags")
+
+# crea tutte le tabelle (incluse le nuove)
 Base.metadata.create_all(engine)
+
 VALID_STATUSES = ("todo", "in_progress", "done")
 
 # ---- Helpers ----
@@ -118,6 +142,9 @@ def auth_user():
         session.close()
         abort(401)
 
+def t_tag(tag: "Tag"):
+    return {"id": tag.id, "name": tag.name, "color": tag.color}
+
 def t_task(t: Task):
     return {
         "id": t.id,
@@ -127,6 +154,7 @@ def t_task(t: Task):
         "order_index": t.order_index,
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
+        "tags": [t_tag(tag) for tag in (t.tags or [])],
     }
 
 # ---- Public ----
@@ -241,6 +269,75 @@ def me():
     finally:
         session.close()
 
+# ---------- TAGS CRUD ----------
+@app.get("/tags")
+def list_tags():
+    u, session = auth_user()
+    try:
+        tags = session.query(Tag).filter_by(user_id=u.id).order_by(Tag.name.asc()).all()
+        return jsonify([t_tag(t) for t in tags])
+    finally:
+        session.close()
+
+@app.post("/tags")
+def create_tag():
+    u, session = auth_user()
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    color = (data.get("color") or "").strip() or None
+    if not name:
+        abort(400, "name is required")
+    try:
+        exists = session.query(Tag).filter_by(user_id=u.id, name=name).first()
+        if exists:
+            abort(409, "tag already exists")
+        t = Tag(user_id=u.id, name=name, color=color)
+        session.add(t)
+        session.commit()
+        return jsonify(t_tag(t)), 201
+    finally:
+        session.close()
+
+@app.patch("/tags/<int:tag_id>")
+def update_tag(tag_id):
+    u, session = auth_user()
+    data = request.get_json(force=True) or {}
+    try:
+        t = session.query(Tag).filter_by(id=tag_id, user_id=u.id).first()
+        if not t:
+            abort(404, "tag not found")
+        if "name" in data:
+            name = (data["name"] or "").strip()
+            if not name:
+                abort(400, "invalid name")
+            dup = session.query(Tag).filter(Tag.user_id==u.id, Tag.name==name, Tag.id!=t.id).first()
+            if dup:
+                abort(409, "tag already exists")
+            t.name = name
+        if "color" in data:
+            color = (data["color"] or "").strip() or None
+            t.color = color
+        t.updated_at = datetime.utcnow()
+        session.commit()
+        return jsonify(t_tag(t))
+    finally:
+        session.close()
+
+@app.delete("/tags/<int:tag_id>")
+def delete_tag(tag_id):
+    u, session = auth_user()
+    try:
+        t = session.query(Tag).filter_by(id=tag_id, user_id=u.id).first()
+        if not t:
+            abort(404, "tag not found")
+        session.query(TaskTag).filter(TaskTag.tag_id == tag_id).delete(synchronize_session=False)
+        session.delete(t)
+        session.commit()
+        return "", 204
+    finally:
+        session.close()
+
+# ---------- TASKS ----------
 @app.get("/tasks")
 def list_tasks():
     u, session = auth_user()
@@ -277,6 +374,13 @@ def create_task():
         next_idx = (last.order_index + 1) if last else 0
         t = Task(user_id=u.id, title=title, description=description, status=status, order_index=next_idx)
         session.add(t)
+
+        # associazione tag (opzionale) tramite array di id
+        tag_ids = data.get("tag_ids") or []
+        if tag_ids:
+            tags = session.query(Tag).filter(Tag.user_id==u.id, Tag.id.in_(tag_ids)).all()
+            t.tags = tags
+
         session.commit()
         return jsonify(t_task(t)), 201
     finally:
@@ -312,6 +416,15 @@ def update_task(task_id):
                 t.order_index = (last.order_index + 1) if last else 0
         if "order_index" in data:
             t.order_index = int(data["order_index"])
+
+        # sostituisci completamente le associazioni tag se passato "tag_ids"
+        if "tag_ids" in data:
+            tag_ids = data.get("tag_ids") or []
+            if not isinstance(tag_ids, list):
+                abort(400, "tag_ids must be an array")
+            new_tags = session.query(Tag).filter(Tag.user_id==u.id, Tag.id.in_(tag_ids)).all() if tag_ids else []
+            t.tags = new_tags
+
         t.updated_at = datetime.utcnow()
         session.commit()
         return jsonify(t_task(t))

@@ -9,7 +9,7 @@ export default function Column({
   onDragOver,
   onDrop,
 
-  // 🔽 De-struttura esplicitamente tutte le callback/props usate sotto
+  // callback/props
   onRemove,
   onEditStart,
   onMoveLeft,
@@ -24,7 +24,11 @@ export default function Column({
   onCancelEdit,
   editingTagId,
   setEditingTagId,
-  tagsList
+  tagsList,
+
+  // nuova gestione priorità in edit
+  editingPriority,
+  setEditingPriority,
 }) {
   const safeTasks = Array.isArray(tasks) ? tasks : []
   const total = typeof counters?.total === 'number' ? counters.total : safeTasks.length
@@ -43,14 +47,14 @@ export default function Column({
             disableLeft={status === 'todo'}
             disableRight={status === 'done'}
 
-            /* 🔽 Passa le callback esplicitamente */
+            /* callback base */
             onRemove={onRemove}
             onEditStart={onEditStart}
             onMoveLeft={onMoveLeft}
             onMoveRight={onMoveRight}
             onDragStart={onDragStart}
 
-            /* 🔽 Stato di editing e setter */
+            /* stato di editing titolo/descrizione */
             isEditing={editingId === t.id}
             editingTitle={editingTitle}
             setEditingTitle={setEditingTitle}
@@ -59,10 +63,14 @@ export default function Column({
             onSaveEdit={onSaveEdit}
             onCancelEdit={onCancelEdit}
 
+            /* tag in edit */
             editingTagId={editingTagId}
             setEditingTagId={setEditingTagId}
             tagsList={tagsList}
 
+            /* priorità in edit */
+            editingPriority={editingPriority}
+            setEditingPriority={setEditingPriority}
           />
         ))}
       </div>

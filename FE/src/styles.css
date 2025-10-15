@@ -336,3 +336,6 @@
   flex: 0 0 16px;
 }
 
+.prioBadge {
+  font-weight: 500;
+}

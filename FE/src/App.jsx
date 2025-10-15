@@ -34,6 +34,9 @@ const PRESET_COLORS = [
   '#ec4899', // pink-500
 ]
 
+// priorità disponibili
+const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'HIGHEST']
+
 // [LOG]
 console.log('[APP] start. hash=', window.location.hash)
 console.log('[APP] token in LS?', !!localStorage.getItem('nb_token'))
@@ -66,6 +69,10 @@ export default function App() {
   const [selectedTagId, setSelectedTagId] = useState('')            // per associare al NUOVO task (singolo tag)
   const [activeTagFilterId, setActiveTagFilterId] = useState(null)  // filtro toggle
   const [editingTagId, setEditingTagId] = useState('')
+
+  // ---------- PRIORITY ----------
+  const [selectedPriority, setSelectedPriority] = useState('LOW')
+  const [editingPriority, setEditingPriority] = useState('LOW')
 
   // Normalizza hash al primo load
   useEffect(() => {
@@ -197,6 +204,7 @@ export default function App() {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       tags: chosenTag ? [chosenTag] : [], // local mode
+      priority: selectedPriority,
     }
 
     // inserimento ottimistico
@@ -213,7 +221,8 @@ export default function App() {
         title: newTask.title,
         description: newTask.description,
         status: newTask.status,
-        tag_ids: chosenTag ? [chosenTag.id] : []
+        tag_ids: chosenTag ? [chosenTag.id] : [],
+        priority: selectedPriority
       })
       .then(created => {
         setCurrentTasks(curr => {
@@ -234,6 +243,7 @@ export default function App() {
     setEditingTitle(task.title)
     setEditingDesc(task.description || '')
     setEditingTagId(String(task?.tags?.[0]?.id ?? ''))
+    setEditingPriority(task?.priority || 'LOW')
   }
 
   function saveEdit(id) {
@@ -247,7 +257,8 @@ export default function App() {
         title: (editingTitle || '').trim() || t.title,
         description: (editingDesc || '').trim(),
         updated_at: new Date().toISOString(),
-        tags: chosenTag ? [chosenTag] : []
+        tags: chosenTag ? [chosenTag] : [],
+        priority: editingPriority
       }
       return updated
     }))
@@ -255,9 +266,10 @@ export default function App() {
     if (isAPI) {
       const payload = {}; if (newTitle) payload.title = newTitle; payload.description = newDesc
       payload.tag_ids = chosenTag ? [chosenTag.id] : []
+      payload.priority = editingPriority
       const n = Number(id)
       storage.updateTask(Number.isFinite(n) ? n : id, payload)
-        .catch(err => console.error('[TASKS] PATCH title/desc failed:', err))
+        .catch(err => console.error('[TASKS] PATCH title/desc/priority failed:', err))
     }
   }
 
@@ -417,13 +429,13 @@ export default function App() {
         </form>
 
 
-        {/* NUOVO TASK + selezione tag da menù a tendina */}
+        {/* NUOVO TASK + selezione tag e priorità */}
         <form className="addForm" onSubmit={addTask} style={{ gap: 8 }}>
           <input className="input" placeholder="Nuovo task…" value={title} onChange={e=>setTitle(e.target.value)} />
           <input className="input" placeholder="Descrizione (opzionale)" value={desc} onChange={e=>setDesc(e.target.value)} />
 
           {/* select tag singolo per il nuovo task */}
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
             <select
               className="input"
               value={selectedTagId}
@@ -444,6 +456,19 @@ export default function App() {
                 background:selectedTagObj.color || '#e5e7eb', border:'1px solid #e5e7eb'
               }} />
             )}
+
+            {/* priorità */}
+            <select
+              className="input"
+              value={selectedPriority}
+              onChange={(e)=> setSelectedPriority(e.target.value)}
+              title="Priorità"
+              style={{ minWidth: 140 }}
+            >
+              {PRIORITIES.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
 
             {/* bottone filtro toggle */}
             <button
@@ -503,6 +528,8 @@ export default function App() {
             editingTagId={editingTagId}
             setEditingTagId={setEditingTagId}
             tagsList={tags}
+            editingPriority={editingPriority}
+            setEditingPriority={setEditingPriority}
           />
         ))}
       </div>
