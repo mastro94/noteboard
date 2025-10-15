@@ -34,8 +34,14 @@ const PRESET_COLORS = [
   '#ec4899', // pink-500
 ]
 
-// priorità disponibili
+// priorità disponibili + emoji
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'HIGHEST']
+const PRIORITY_EMOJI = {
+  LOW: '🟢',
+  MEDIUM: '🟡',
+  HIGH: '🟠',
+  HIGHEST: '🔴',
+}
 
 // [LOG]
 console.log('[APP] start. hash=', window.location.hash)
@@ -65,9 +71,9 @@ export default function App() {
   // ---------- TAGS ----------
   const [tags, setTags] = useState([])
   const [newTagName, setNewTagName] = useState('')
-  const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]) // default dal preset
-  const [selectedTagId, setSelectedTagId] = useState('')            // per associare al NUOVO task (singolo tag)
-  const [activeTagFilterId, setActiveTagFilterId] = useState(null)  // filtro toggle
+  const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0])
+  const [selectedTagId, setSelectedTagId] = useState('')
+  const [activeTagFilterId, setActiveTagFilterId] = useState(null)
   const [editingTagId, setEditingTagId] = useState('')
 
   // ---------- PRIORITY ----------
@@ -155,7 +161,6 @@ export default function App() {
         const data = await storage.listTags()
         if (!abort && Array.isArray(data)) {
           setTags(data)
-          // se avevo un tag selezionato che non esiste più, pulisco
           if (selectedTagId && !data.find(t => String(t.id) === String(selectedTagId))) {
             setSelectedTagId('')
           }
@@ -203,14 +208,12 @@ export default function App() {
       order_index: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      tags: chosenTag ? [chosenTag] : [], // local mode
+      tags: chosenTag ? [chosenTag] : [],
       priority: selectedPriority,
     }
 
-    // inserimento ottimistico
     setCurrentTasks(prev => {
       const next = [...prev, newTask]
-      // ricalcolo order_index nella colonna
       next.filter(tt=>tt.status==='todo').sort(byIndex).forEach((tt,i)=> tt.order_index=i)
       return next
     })
@@ -226,7 +229,6 @@ export default function App() {
       })
       .then(created => {
         setCurrentTasks(curr => {
-          // sostituisce l’ottimistico con la risposta del BE
           const idx = curr.findIndex(x => x.title === newTask.title && x.created_at === newTask.created_at)
           if (idx >= 0) {
             const copy = [...curr]; copy[idx] = { ...created }; return copy
@@ -360,7 +362,7 @@ export default function App() {
     reader.readAsText(f); ev.target.value = ''
   }
 
-  // toggle filtro tag: se già filtrato con quel tag → reset; altrimenti applica
+  // toggle filtro tag
   function toggleTagFilter(){
     if (!selectedTagId) return
     setActiveTagFilterId(prev =>
@@ -382,7 +384,7 @@ export default function App() {
       </header>
 
       <div className="toolbar" style={{ gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        {/* CREA TAG con palette colori fissa */}
+        {/* CREA TAG */}
         <form className="addForm" onSubmit={onCreateTag} style={{ gap: 8, alignItems: 'center' }}>
           <input
             className="input"
@@ -428,14 +430,13 @@ export default function App() {
           <button className="btn" type="submit">Aggiungi Tag</button>
         </form>
 
-
-        {/* NUOVO TASK + selezione tag e priorità */}
+        {/* NUOVO TASK: tag + priorità con emoji */}
         <form className="addForm" onSubmit={addTask} style={{ gap: 8 }}>
           <input className="input" placeholder="Nuovo task…" value={title} onChange={e=>setTitle(e.target.value)} />
           <input className="input" placeholder="Descrizione (opzionale)" value={desc} onChange={e=>setDesc(e.target.value)} />
 
-          {/* select tag singolo per il nuovo task */}
           <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+            {/* select tag */}
             <select
               className="input"
               value={selectedTagId}
@@ -449,7 +450,7 @@ export default function App() {
               ))}
             </select>
 
-            {/* badge di colore per il tag attualmente selezionato */}
+            {/* preview colore tag */}
             {selectedTagObj && (
               <span title={`Colore ${selectedTagObj.color}`} style={{
                 display:'inline-block', width:20, height:20, borderRadius:4,
@@ -457,20 +458,21 @@ export default function App() {
               }} />
             )}
 
-            {/* priorità */}
+            {/* PRIORITÀ con emoji nelle option (senza anteprima esterna) */}
             <select
               className="input"
               value={selectedPriority}
               onChange={(e)=> setSelectedPriority(e.target.value)}
               title="Priorità"
-              style={{ minWidth: 140 }}
+              style={{ minWidth: 170 }}
             >
-              {PRIORITIES.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
+              <option value="LOW">🟢 LOW</option>
+              <option value="MEDIUM">🟡 MEDIUM</option>
+              <option value="HIGH">🟠 HIGH</option>
+              <option value="HIGHEST">🔴 HIGHEST</option>
             </select>
 
-            {/* bottone filtro toggle */}
+            {/* bottone filtro tag */}
             <button
               type="button"
               className={isFilterActive ? 'warnBtn' : 'btn'}
@@ -480,6 +482,7 @@ export default function App() {
               {isFilterActive ? 'Mostra tutti' : 'Mostra solo questo tag'}
             </button>
           </div>
+
 
           <button className="primaryBtn" type="submit">Aggiungi</button>
         </form>
@@ -494,7 +497,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* info filtro attivo */}
       {activeTagFilterId && (
         <div style={{ margin: '4px 0 8px', fontSize: 13 }}>
           Filtrando per tag: <strong>
