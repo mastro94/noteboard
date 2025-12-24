@@ -6,7 +6,7 @@ import Login from './auth/Login'
 import Register from './auth/Register'
 import ResetPassword from './auth/ResetPassword'
 import { storage, isAPI } from './services'
-import { STATUSES, LABELS, LS_KEY } from './utils/constants'
+import { STATUSES, LABELS, LS_KEY, LS_ACTIVE_BOARD_KEY } from './utils/constants'
 import { uid, byIndex, normalizeOrder } from './utils/helpers'
 import { watchAuth, getFirebaseIdToken, logoutFirebase } from './services/firebaseAuth'
 import { exchangeFirebaseToken } from './services/auth'
@@ -38,7 +38,6 @@ export const PRESET_COLORS = [
   { hex: '#ec4899', name: 'Rosa' },
 ]
 
-
 // Priorità + emoji (per menu a tendina)
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'HIGHEST']
 export const PRIORITY_EMOJI = {
@@ -61,6 +60,11 @@ export default function App() {
     const t = localStorage.getItem('nb_token')
     return t ? { token: t } : null
   })
+
+  // --- Boards (API) ---
+  const [activeBoardId, setActiveBoardId] = useState(() => localStorage.getItem(LS_ACTIVE_BOARD_KEY) || '')
+  const [boards, setBoards] = useState([])
+  const [newBoardTitle, setNewBoardTitle] = useState('')
 
   // --- New Task form ---
   const [title, setTitle] = useState('')
@@ -113,6 +117,9 @@ export default function App() {
           localStorage.removeItem('nb_token')
           setAuth(null)
           setTasksApi([])
+          setBoards([])
+          localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
+          setActiveBoardId('')
           if (!route.startsWith(ROUTES.login) && !route.startsWith(ROUTES.signup) && !route.startsWith(ROUTES.reset)) {
             window.location.hash = ROUTES.login
           }
@@ -134,7 +141,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Carica tasks dal BE
+  // Carica BOARDS (API)
   useEffect(() => {
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
@@ -142,14 +149,37 @@ export default function App() {
     let abort = false
     ;(async () => {
       try {
-        const data = await storage.listTasks()
+        const data = await storage.listBoards()
+        if (abort) return
+        setBoards(Array.isArray(data) ? data : [])
+        if (!activeBoardId && Array.isArray(data) && data.length === 1) {
+          localStorage.setItem(LS_ACTIVE_BOARD_KEY, String(data[0].id))
+          setActiveBoardId(String(data[0].id))
+        }
+      } catch (err) {
+        console.error('[BOARDS] listBoards failed:', err)
+      }
+    })()
+    return () => { abort = true }
+  }, [isAPI, auth?.token, activeBoardId])
+
+  // Carica tasks dal BE (per board)
+  useEffect(() => {
+    if (!isAPI) return
+    const token = localStorage.getItem('nb_token')
+    if (!token) return
+    if (!activeBoardId) return
+    let abort = false
+    ;(async () => {
+      try {
+        const data = await storage.listTasks(activeBoardId)
         if (!abort) setTasksApi(data)
       } catch (err) {
         console.error('[TASKS] listTasks failed:', err)
       }
     })()
     return () => { abort = true }
-  }, [isAPI, auth])
+  }, [isAPI, auth, activeBoardId])
 
   // /me per avatar
   useEffect(() => {
@@ -161,27 +191,24 @@ export default function App() {
     }).catch(err => console.error('[AUTH] /me failed:', err))
   }, [isAPI, auth])
 
-  // Carica TAG
+  // Carica TAG (per board)
   useEffect(() => {
+    if (isAPI && !activeBoardId) return
     let abort = false
     ;(async () => {
       try {
-        const data = await storage.listTags()
+        const data = await storage.listTags(activeBoardId)
         if (!abort && Array.isArray(data)) {
           setTags(data)
-          if (selectedTagId && !data.find(t => String(t.id) === String(selectedTagId))) {
-            setSelectedTagId('')
-          }
-          if (activeTagFilterId && !data.find(t => String(t.id) === String(activeTagFilterId))) {
-            setActiveTagFilterId(null)
-          }
+          if (selectedTagId && !data.find(t => String(t.id) === String(selectedTagId))) setSelectedTagId('')
+          if (activeTagFilterId && !data.find(t => String(t.id) === String(activeTagFilterId))) setActiveTagFilterId(null)
         }
       } catch (e) {
         console.warn('[TAGS] listTags failed (ok in local mode):', e)
       }
     })()
     return () => { abort = true }
-  }, [isAPI, auth?.token])
+  }, [isAPI, auth?.token, activeBoardId]) // <-- aggiunto activeBoardId
 
   // --- Actions: TAGS ---
   async function onCreateTag(e){
@@ -189,7 +216,11 @@ export default function App() {
     const name = newTagName.trim()
     if (!name) return
     try {
-      const created = await storage.createTag({ name, color: newTagColor || undefined })
+      const created = await storage.createTag({
+        name,
+        color: newTagColor || undefined,
+        ...(isAPI ? { board_id: activeBoardId } : {}),
+      })
       setTags(prev => [...prev, created].sort((a,b)=>a.name.localeCompare(b.name)))
       setNewTagName('')
       setNewTagColor(PRESET_COLORS[0].hex)
@@ -232,6 +263,9 @@ export default function App() {
     if (isAPI && !localStorage.getItem('nb_token')) {
       alert('Devi essere loggato per creare task.'); return
     }
+    if (isAPI && !activeBoardId) {
+      alert('Seleziona prima una board.'); return
+    }
 
     const chosenTag = tags.find(x => String(x.id) === String(selectedTagId))
     const newTask = {
@@ -259,7 +293,8 @@ export default function App() {
         description: newTask.description,
         status: newTask.status,
         tag_ids: chosenTag ? [chosenTag.id] : [],
-        priority: selectedPriority
+        priority: selectedPriority,
+        board_id: activeBoardId,
       })
       .then(created => {
         setCurrentTasks(curr => {
@@ -370,6 +405,8 @@ export default function App() {
   async function logout(){
     await logoutFirebase().catch(()=>{})
     localStorage.removeItem('nb_token')
+    localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
+    setActiveBoardId('')
     setAuth(null)
     window.location.hash = ROUTES.login
   }
@@ -408,6 +445,57 @@ export default function App() {
     return <Login />
   }
 
+  // ---- Board gating (API): se non selezionata, mostra picker ----
+  if (isAPI && !activeBoardId) {
+    const selectBoard = (id) => {
+      localStorage.setItem(LS_ACTIVE_BOARD_KEY, String(id))
+      setActiveBoardId(String(id))
+      setActiveTab('tasks')
+    }
+
+    const createBoard = async (e) => {
+      e.preventDefault()
+      const title = newBoardTitle.trim()
+      if (!title) return
+      const created = await storage.createBoard({ title })
+      setBoards(prev => [...prev, created])
+      setNewBoardTitle('')
+      selectBoard(created.id)
+    }
+
+    return (
+      <div className="container">
+        <header className="header">
+          <h1>Noteboard</h1>
+          <div className="header-right">
+            <UserAvatar user={auth?.user} />
+            <button className="btn" onClick={logout}>Logout</button>
+          </div>
+        </header>
+
+        <h2 style={{ marginTop: 12 }}>Seleziona una board</h2>
+
+        <form onSubmit={createBoard} style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
+          <input
+            className="input"
+            value={newBoardTitle}
+            onChange={(e)=>setNewBoardTitle(e.target.value)}
+            placeholder="Nome board…"
+          />
+          <button className="primaryBtn" type="submit">Crea</button>
+        </form>
+
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {boards.length ? boards.map(b => (
+            <button key={b.id} className="btn" onClick={()=>selectBoard(b.id)}>
+              {b.title}
+            </button>
+          )) : <span style={{ opacity: 0.7 }}>Nessuna board. Creane una.</span>}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container">
       <header className="header">
@@ -435,7 +523,6 @@ export default function App() {
           Tag Manager
         </button>
       </nav>
-
 
       {/* CONTENUTO SCHEDE */}
       {activeTab === 'tags' ? (

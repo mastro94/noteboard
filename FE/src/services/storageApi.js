@@ -20,13 +20,30 @@ async function http(path, opts = {}) {
 
 export const storageApi = {
   mode: 'api',
-  listTasks() { return http('/tasks') },
+
+  // --- BOARDS ---
+  listBoards() { return http('/boards') },
+  createBoard(payload) { return http('/boards', { method:'POST', body: JSON.stringify(payload) }) },
+
+  // --- TASKS ---
+  listTasks(boardId) {
+    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
+    return http(`/tasks${q}`)
+  },
   createTask(payload) { return http('/tasks', { method:'POST', body: JSON.stringify(payload) }) },
   updateTask(id, payload) { return http(`/tasks/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
   deleteTask(id) { return http(`/tasks/${id}`, { method:'DELETE' }) },
+
+  // --- USER ---
   me() { return http('/me') },
-  listTags() { return http('/tags') },
+
+  // --- TAGS ---
+  listTags(boardId) {
+    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
+    return http(`/tags${q}`)
+  },
   createTag(payload) { return http('/tags', { method:'POST', body: JSON.stringify(payload) }) },
   updateTag(id, payload){ return http(`/tags/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
   deleteTag(id){ return http(`/tags/${id}`, { method:'DELETE' }) },
 }
+
