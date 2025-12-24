@@ -99,7 +99,7 @@ export default function App() {
     if (normalized !== hash) window.location.hash = normalized
     setRoute(normalized)
     if (auth) setActiveTab('tasks')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Router minimale
@@ -115,10 +115,11 @@ export default function App() {
       try {
         if (!fbUser) {
           localStorage.removeItem('nb_token')
+          localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
           setAuth(null)
           setTasksApi([])
+          setTags([])
           setBoards([])
-          localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
           setActiveBoardId('')
           if (!route.startsWith(ROUTES.login) && !route.startsWith(ROUTES.signup) && !route.startsWith(ROUTES.reset)) {
             window.location.hash = ROUTES.login
@@ -138,48 +139,8 @@ export default function App() {
       }
     })
     return () => un()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Carica BOARDS (API)
-  useEffect(() => {
-    if (!isAPI) return
-    const token = localStorage.getItem('nb_token')
-    if (!token) return
-    let abort = false
-    ;(async () => {
-      try {
-        const data = await storage.listBoards()
-        if (abort) return
-        setBoards(Array.isArray(data) ? data : [])
-        if (!activeBoardId && Array.isArray(data) && data.length === 1) {
-          localStorage.setItem(LS_ACTIVE_BOARD_KEY, String(data[0].id))
-          setActiveBoardId(String(data[0].id))
-        }
-      } catch (err) {
-        console.error('[BOARDS] listBoards failed:', err)
-      }
-    })()
-    return () => { abort = true }
-  }, [isAPI, auth?.token, activeBoardId])
-
-  // Carica tasks dal BE (per board)
-  useEffect(() => {
-    if (!isAPI) return
-    const token = localStorage.getItem('nb_token')
-    if (!token) return
-    if (!activeBoardId) return
-    let abort = false
-    ;(async () => {
-      try {
-        const data = await storage.listTasks(activeBoardId)
-        if (!abort) setTasksApi(data)
-      } catch (err) {
-        console.error('[TASKS] listTasks failed:', err)
-      }
-    })()
-    return () => { abort = true }
-  }, [isAPI, auth, activeBoardId])
 
   // /me per avatar
   useEffect(() => {
@@ -191,24 +152,98 @@ export default function App() {
     }).catch(err => console.error('[AUTH] /me failed:', err))
   }, [isAPI, auth])
 
-  // Carica TAG (per board)
+  // Carica BOARDS (API) e seleziona board valida (o prima)
   useEffect(() => {
-    if (isAPI && !activeBoardId) return
+    if (!isAPI) return
+    const token = localStorage.getItem('nb_token')
+    if (!token) return
     let abort = false
     ;(async () => {
       try {
-        const data = await storage.listTags(activeBoardId)
-        if (!abort && Array.isArray(data)) {
-          setTags(data)
-          if (selectedTagId && !data.find(t => String(t.id) === String(selectedTagId))) setSelectedTagId('')
-          if (activeTagFilterId && !data.find(t => String(t.id) === String(activeTagFilterId))) setActiveTagFilterId(null)
+        const data = await storage.listBoards()
+        if (abort) return
+        const list = Array.isArray(data) ? data : []
+        setBoards(list)
+
+        const saved = localStorage.getItem(LS_ACTIVE_BOARD_KEY) || ''
+        const savedValid = saved && list.some(b => String(b.id) === String(saved))
+        const fallback = list[0]?.id != null ? String(list[0].id) : ''
+
+        const pick = savedValid ? String(saved) : fallback
+        if (pick && pick !== String(activeBoardId || '')) {
+          localStorage.setItem(LS_ACTIVE_BOARD_KEY, pick)
+          setActiveBoardId(pick)
         }
-      } catch (e) {
-        console.warn('[TAGS] listTags failed (ok in local mode):', e)
+      } catch (err) {
+        console.error('[BOARDS] listBoards failed:', err)
       }
     })()
     return () => { abort = true }
-  }, [isAPI, auth?.token, activeBoardId]) // <-- aggiunto activeBoardId
+    // NB: NON mettere activeBoardId tra le dipendenze (evita loop)
+  }, [isAPI, auth?.token])
+
+  // Quando cambia board: persisti + reset UI + carica tasks/tags
+  useEffect(() => {
+    if (!isAPI) return
+    const token = localStorage.getItem('nb_token')
+    if (!token) return
+    if (!activeBoardId) return
+
+    localStorage.setItem(LS_ACTIVE_BOARD_KEY, String(activeBoardId))
+
+    // reset “local UI state” legata alla board
+    setTasksApi([])
+    setTags([])
+    setSelectedTagId('')
+    setActiveTagFilterId(null)
+    setEditingId(null)
+    setActiveTab('tasks')
+
+    let abort = false
+    ;(async () => {
+      try {
+        const [ts, tgs] = await Promise.all([
+          storage.listTasks(activeBoardId),
+          storage.listTags(activeBoardId),
+        ])
+        if (abort) return
+        setTasksApi(Array.isArray(ts) ? ts : [])
+        setTags(Array.isArray(tgs) ? tgs : [])
+      } catch (err) {
+        console.error('[BOARD] reload tasks/tags failed:', err)
+      }
+    })()
+
+    return () => { abort = true }
+  }, [isAPI, auth?.token, activeBoardId])
+
+  // --- Actions: BOARDS ---
+  const activeBoardObj = useMemo(
+    () => boards.find(b => String(b.id) === String(activeBoardId)),
+    [boards, activeBoardId]
+  )
+
+  const selectBoard = (id) => {
+    const v = String(id)
+    localStorage.setItem(LS_ACTIVE_BOARD_KEY, v)
+    setActiveBoardId(v)
+  }
+
+  const createBoard = async (e) => {
+    e.preventDefault()
+    if (!isAPI) return
+    const title = newBoardTitle.trim()
+    if (!title) return
+    try {
+      const created = await storage.createBoard({ title })
+      setBoards(prev => [...prev, created])
+      setNewBoardTitle('')
+      selectBoard(created.id)
+    } catch (err) {
+      console.error('[BOARDS] createBoard failed:', err)
+      alert('Errore creazione board: ' + err.message)
+    }
+  }
 
   // --- Actions: TAGS ---
   async function onCreateTag(e){
@@ -278,6 +313,7 @@ export default function App() {
       updated_at: new Date().toISOString(),
       tags: chosenTag ? [chosenTag] : [],
       priority: selectedPriority,
+      board_id: activeBoardId || undefined,
     }
 
     setCurrentTasks(prev => {
@@ -323,7 +359,7 @@ export default function App() {
     const chosenTag = tags.find(x => String(x.id) === String(editingTagId))
     setCurrentTasks(prev => prev.map(t => {
       if (t.id !== id) return t
-      const updated = {
+      return {
         ...t,
         title: (editingTitle || '').trim() || t.title,
         description: (editingDesc || '').trim(),
@@ -331,11 +367,12 @@ export default function App() {
         tags: chosenTag ? [chosenTag] : [],
         priority: editingPriority
       }
-      return updated
     }))
     setEditingId(null)
     if (isAPI) {
-      const payload = {}; if (newTitle) payload.title = newTitle; payload.description = newDesc
+      const payload = {}
+      if (newTitle) payload.title = newTitle
+      payload.description = newDesc
       payload.tag_ids = chosenTag ? [chosenTag.id] : []
       payload.priority = editingPriority
       const n = Number(id)
@@ -447,22 +484,6 @@ export default function App() {
 
   // ---- Board gating (API): se non selezionata, mostra picker ----
   if (isAPI && !activeBoardId) {
-    const selectBoard = (id) => {
-      localStorage.setItem(LS_ACTIVE_BOARD_KEY, String(id))
-      setActiveBoardId(String(id))
-      setActiveTab('tasks')
-    }
-
-    const createBoard = async (e) => {
-      e.preventDefault()
-      const title = newBoardTitle.trim()
-      if (!title) return
-      const created = await storage.createBoard({ title })
-      setBoards(prev => [...prev, created])
-      setNewBoardTitle('')
-      selectBoard(created.id)
-    }
-
     return (
       <div className="container">
         <header className="header">
@@ -499,7 +520,43 @@ export default function App() {
   return (
     <div className="container">
       <header className="header">
-        <h1>Noteboard</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h1 style={{ margin: 0 }}>Noteboard</h1>
+
+          {/* Board selector (API) */}
+          {isAPI && (
+            <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
+              <select
+                className="btn"
+                value={activeBoardId}
+                onChange={(e) => selectBoard(e.target.value)}
+                title="Seleziona board"
+              >
+                {boards.map(b => (
+                  <option key={b.id} value={b.id}>{b.title}</option>
+                ))}
+              </select>
+
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  // torna al picker (senza logout)
+                  localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
+                  setActiveBoardId('')
+                }}
+                title="Cambia board"
+              >
+                Cambia
+              </button>
+
+              <span style={{ fontSize: 12, opacity: 0.75 }}>
+                {activeBoardObj ? `Board: ${activeBoardObj.title}` : ''}
+              </span>
+            </div>
+          )}
+        </div>
+
         <div className="header-right">
           <UserAvatar user={auth?.user} />
           <button className="btn" onClick={logout}>Logout</button>
