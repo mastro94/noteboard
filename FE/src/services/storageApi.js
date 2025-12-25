@@ -23,7 +23,9 @@ export const storageApi = {
 
   // --- BOARDS ---
   listBoards() { return http('/boards') },
-  createBoard(payload) { return http('/boards', { method:'POST', body: JSON.stringify(payload) }) },
+  createBoard(payload) { return http('/boards', { method: 'POST', body: JSON.stringify(payload) }) },
+  deleteBoard(id) { return http(`/boards/${id}`, { method: 'DELETE' }) },
+  // renameBoard(id, payload) { return http(`/boards/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
 
   // --- TASKS ---
   listTasks(boardId) {
@@ -31,11 +33,14 @@ export const storageApi = {
     return http(`/tasks${q}`)
   },
   createTask(payload) { return http('/tasks', { method:'POST', body: JSON.stringify(payload) }) },
-  updateTask(id, payload) { return http(`/tasks/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
-  deleteTask(id) { return http(`/tasks/${id}`, { method:'DELETE' }) },
-
-  // --- USER ---
-  me() { return http('/me') },
+  updateTask(id, payload, boardId) {
+    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
+    return http(`/tasks/${id}${q}`, { method:'PATCH', body: JSON.stringify(payload) })
+  },
+  deleteTask(id, boardId) {
+    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
+    return http(`/tasks/${id}${q}`, { method:'DELETE' })
+  },
 
   // --- TAGS ---
   listTags(boardId) {
@@ -43,7 +48,15 @@ export const storageApi = {
     return http(`/tags${q}`)
   },
   createTag(payload) { return http('/tags', { method:'POST', body: JSON.stringify(payload) }) },
-  updateTag(id, payload){ return http(`/tags/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
-  deleteTag(id){ return http(`/tags/${id}`, { method:'DELETE' }) },
-}
+  updateTag(id, payload, boardId) {
+    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
+    return http(`/tags/${id}${q}`, { method:'PATCH', body: JSON.stringify(payload) })
+  },
+  deleteTag(id, boardId) {
+    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
+    return http(`/tags/${id}${q}`, { method:'DELETE' })
+  },
 
+  // --- USER ---
+  me() { return http('/me') },
+}

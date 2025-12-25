@@ -2,7 +2,10 @@ import os, json, jwt
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, or_
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Text, DateTime, Boolean,
+    ForeignKey, or_, text
+)
 from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session, relationship
 from passlib.hash import pbkdf2_sha256
 
@@ -82,33 +85,45 @@ class User(Base):
     is_verified   = Column(Boolean, default=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
     tasks         = relationship("Task", backref="user", cascade="all,delete")
-    # relazione con i Tag (backref su Tag.user)
     tags          = relationship("Tag", backref="user", cascade="all,delete")
+    boards        = relationship("Board", backref="user", cascade="all,delete")
+
+
+class Board(Base):
+    __tablename__ = "boards"
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title      = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Task(Base):
     __tablename__ = "tasks"
     id          = Column(Integer, primary_key=True)
     user_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
+    board_id    = Column(Integer, ForeignKey("boards.id"), nullable=False)
     title       = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     status      = Column(String(20), nullable=False, default="todo")
     order_index = Column(Integer, nullable=False, default=0)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow)
+    priority    = Column(String(10), nullable=False, default="LOW")
     # backref 'tags' è definito su Tag tramite relazione secondaria
+
 
 # --- Nuovi modelli per i Tag ---
 class TaskTag(Base):
     __tablename__ = "task_tags"
     task_id = Column(Integer, ForeignKey("tasks.id"), primary_key=True)
     tag_id  = Column(Integer, ForeignKey("tags.id"),  primary_key=True)
-    priority   = Column(String(10), nullable=False, default="LOW")
 
 
 class Tag(Base):
     __tablename__ = "tags"
     id         = Column(Integer, primary_key=True)
     user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
+    board_id   = Column(Integer, ForeignKey("boards.id"), nullable=False)
     name       = Column(String(50), nullable=False)
     color      = Column(String(7), nullable=True)  # es. "#6e56cf"
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -116,10 +131,45 @@ class Tag(Base):
     # relazione molti-a-molti con Task
     tasks = relationship("Task", secondary="task_tags", backref="tags")
 
-# crea tutte le tabelle (incluse le nuove)
-Base.metadata.create_all(engine)
+# ---------- AUTO MIGRATION (SQLite) ----------
+def _sqlite_table_exists(session, name: str) -> bool:
+    r = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:n"), {"n": name}).fetchone()
+    return bool(r)
+
+def _sqlite_column_exists(session, table: str, col: str) -> bool:
+    rows = session.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    return any(str(r[1]) == col for r in rows)
+
+def _bootstrap_schema():
+    # create missing tables
+    Base.metadata.create_all(engine)
+
+    # add missing columns for existing installations (SQLite)
+    if not DB_URL.startswith("sqlite"):
+        return
+    session = SessionLocal()
+    try:
+        # boards table might not exist in legacy DB
+        if not _sqlite_table_exists(session, "boards"):
+            # create all again (will create boards)
+            Base.metadata.create_all(engine)
+
+        # tasks.board_id
+        if _sqlite_table_exists(session, "tasks") and not _sqlite_column_exists(session, "tasks", "board_id"):
+            session.execute(text("ALTER TABLE tasks ADD COLUMN board_id INTEGER"))
+            session.commit()
+
+        # tags.board_id
+        if _sqlite_table_exists(session, "tags") and not _sqlite_column_exists(session, "tags", "board_id"):
+            session.execute(text("ALTER TABLE tags ADD COLUMN board_id INTEGER"))
+            session.commit()
+    finally:
+        session.close()
+
+_bootstrap_schema()
 
 VALID_STATUSES = ("todo", "in_progress", "done")
+VALID_PRIORITIES = ("LOW", "MEDIUM", "HIGH", "HIGHEST")
 
 # ---- Helpers ----
 def auth_user():
@@ -131,10 +181,10 @@ def auth_user():
         data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
     except Exception:
         abort(401)
-    uid = data.get("uid")
+    uid_ = data.get("uid")
     session = SessionLocal()
     try:
-        u = session.get(User, uid)
+        u = session.get(User, uid_)
         if not u:
             abort(401)
         return u, session
@@ -142,8 +192,46 @@ def auth_user():
         session.close()
         abort(401)
 
+def require_board(u, session):
+    # board_id from querystring or JSON payload
+    bid = request.args.get("board_id")
+    if bid is None:
+        payload = request.get_json(silent=True) or {}
+        bid = payload.get("board_id")
+
+    # if specified, validate ownership
+    if bid is not None and str(bid).strip() != "":
+        try:
+            bid_int = int(bid)
+        except Exception:
+            abort(400, "invalid board_id")
+        b = session.query(Board).filter_by(id=bid_int, user_id=u.id).first()
+        if not b:
+            abort(404, "board not found")
+        return b
+
+    # default board: first existing or create one
+    b = session.query(Board).filter_by(user_id=u.id).order_by(Board.id.asc()).first()
+    if not b:
+        b = Board(user_id=u.id, title="My Board")
+        session.add(b)
+        session.commit()
+
+        # backfill existing legacy rows (if any) that have NULL board_id
+        # tasks
+        if DB_URL.startswith("sqlite") and _sqlite_column_exists(session, "tasks", "board_id"):
+            session.execute(text("UPDATE tasks SET board_id=:bid WHERE user_id=:uid AND (board_id IS NULL OR board_id='')"),
+                            {"bid": b.id, "uid": u.id})
+        # tags
+        if DB_URL.startswith("sqlite") and _sqlite_column_exists(session, "tags", "board_id"):
+            session.execute(text("UPDATE tags SET board_id=:bid WHERE user_id=:uid AND (board_id IS NULL OR board_id='')"),
+                            {"bid": b.id, "uid": u.id})
+        session.commit()
+
+    return b
+
 def t_tag(tag: "Tag"):
-    return {"id": tag.id, "name": tag.name, "color": tag.color}
+    return {"id": tag.id, "name": tag.name, "color": tag.color, "board_id": tag.board_id}
 
 def t_task(t: Task):
     return {
@@ -155,6 +243,8 @@ def t_task(t: Task):
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
         "tags": [t_tag(tag) for tag in (t.tags or [])],
+        "priority": t.priority,
+        "board_id": t.board_id,
     }
 
 # ---- Public ----
@@ -269,12 +359,90 @@ def me():
     finally:
         session.close()
 
+# ---------- BOARDS ----------
+PROTECT_LAST_BOARD = True  # metti False se vuoi poter cancellare anche l'ultima board
+
+def t_board(b: "Board"):
+    return {"id": b.id, "title": b.title, "created_at": b.created_at.isoformat() if b.created_at else None}
+
+@app.get("/boards")
+def list_boards():
+    u, session = auth_user()
+    try:
+        rows = (
+            session.query(Board)
+            .filter_by(user_id=u.id)
+            .order_by(Board.created_at.desc(), Board.id.desc())
+            .all()
+        )
+        return jsonify([t_board(b) for b in rows])
+    finally:
+        session.close()
+
+@app.post("/boards")
+def create_board():
+    u, session = auth_user()
+    data = request.get_json(force=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        abort(400, "title required")
+    if len(title) > 100:
+        abort(400, "title too long (max 100)")
+    try:
+        b = Board(user_id=u.id, title=title)
+        session.add(b)
+        session.commit()
+        return jsonify(t_board(b)), 201
+    finally:
+        session.close()
+
+@app.patch("/boards/<int:board_id>")
+def rename_board(board_id):
+    u, session = auth_user()
+    data = request.get_json(force=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        abort(400, "title required")
+    if len(title) > 100:
+        abort(400, "title too long (max 100)")
+    try:
+        b = session.query(Board).filter_by(id=board_id, user_id=u.id).first()
+        if not b:
+            abort(404, "board not found")
+        b.title = title
+        session.commit()
+        return jsonify(t_board(b))
+    finally:
+        session.close()
+
+@app.delete("/boards/<int:board_id>")
+def delete_board(board_id):
+    u, session = auth_user()
+    try:
+        b = session.query(Board).filter_by(id=board_id, user_id=u.id).first()
+        if not b:
+            abort(404, "board not found")
+
+        if PROTECT_LAST_BOARD:
+            count = session.query(Board).filter_by(user_id=u.id).count()
+            if count <= 1:
+                abort(400, "cannot delete the last board")
+
+        session.delete(b)  # FK ON DELETE CASCADE elimina tasks/tags collegati
+        session.commit()
+        return "", 204
+    finally:
+        session.close()
+
+
+
 # ---------- TAGS CRUD ----------
 @app.get("/tags")
 def list_tags():
     u, session = auth_user()
     try:
-        tags = session.query(Tag).filter_by(user_id=u.id).order_by(Tag.name.asc()).all()
+        b = require_board(u, session)
+        tags = session.query(Tag).filter_by(user_id=u.id, board_id=b.id).order_by(Tag.name.asc()).all()
         return jsonify([t_tag(t) for t in tags])
     finally:
         session.close()
@@ -288,10 +456,11 @@ def create_tag():
     if not name:
         abort(400, "name is required")
     try:
-        exists = session.query(Tag).filter_by(user_id=u.id, name=name).first()
+        b = require_board(u, session)
+        exists = session.query(Tag).filter_by(user_id=u.id, board_id=b.id, name=name).first()
         if exists:
             abort(409, "tag already exists")
-        t = Tag(user_id=u.id, name=name, color=color)
+        t = Tag(user_id=u.id, board_id=b.id, name=name, color=color)
         session.add(t)
         session.commit()
         return jsonify(t_tag(t)), 201
@@ -303,14 +472,17 @@ def update_tag(tag_id):
     u, session = auth_user()
     data = request.get_json(force=True) or {}
     try:
-        t = session.query(Tag).filter_by(id=tag_id, user_id=u.id).first()
+        b = require_board(u, session)
+        t = session.query(Tag).filter_by(id=tag_id, user_id=u.id, board_id=b.id).first()
         if not t:
             abort(404, "tag not found")
         if "name" in data:
             name = (data["name"] or "").strip()
             if not name:
                 abort(400, "invalid name")
-            dup = session.query(Tag).filter(Tag.user_id==u.id, Tag.name==name, Tag.id!=t.id).first()
+            dup = session.query(Tag).filter(
+                Tag.user_id==u.id, Tag.board_id==b.id, Tag.name==name, Tag.id!=t.id
+            ).first()
             if dup:
                 abort(409, "tag already exists")
             t.name = name
@@ -327,7 +499,8 @@ def update_tag(tag_id):
 def delete_tag(tag_id):
     u, session = auth_user()
     try:
-        t = session.query(Tag).filter_by(id=tag_id, user_id=u.id).first()
+        b = require_board(u, session)
+        t = session.query(Tag).filter_by(id=tag_id, user_id=u.id, board_id=b.id).first()
         if not t:
             abort(404, "tag not found")
         session.query(TaskTag).filter(TaskTag.tag_id == tag_id).delete(synchronize_session=False)
@@ -342,8 +515,9 @@ def delete_tag(tag_id):
 def list_tasks():
     u, session = auth_user()
     try:
+        b = require_board(u, session)
         status = request.args.get("status")
-        q = session.query(Task).filter(Task.user_id == u.id)
+        q = session.query(Task).filter(Task.user_id == u.id, Task.board_id == b.id)
         if status:
             if status not in VALID_STATUSES:
                 abort(400, "invalid status")
@@ -360,25 +534,36 @@ def create_task():
     title = (data.get("title") or "").strip()
     description = (data.get("description") or "").strip() or None
     status = data.get("status", "todo")
+    priority = (data.get("priority") or "LOW").upper()
+    if priority not in VALID_PRIORITIES:
+        abort(400, "invalid priority")
     if not title:
         abort(400, "title required")
     if status not in VALID_STATUSES:
         abort(400, "invalid status")
     try:
+        b = require_board(u, session)
         last = (
             session.query(Task)
-            .filter_by(user_id=u.id, status=status)
+            .filter_by(user_id=u.id, board_id=b.id, status=status)
             .order_by(Task.order_index.desc())
             .first()
         )
         next_idx = (last.order_index + 1) if last else 0
-        t = Task(user_id=u.id, title=title, description=description, status=status, order_index=next_idx)
+        t = Task(
+            user_id=u.id,
+            board_id=b.id,
+            title=title,
+            description=description,
+            status=status,
+            order_index=next_idx,
+            priority=priority
+        )
         session.add(t)
 
-        # associazione tag (opzionale) tramite array di id
         tag_ids = data.get("tag_ids") or []
         if tag_ids:
-            tags = session.query(Tag).filter(Tag.user_id==u.id, Tag.id.in_(tag_ids)).all()
+            tags = session.query(Tag).filter(Tag.user_id==u.id, Tag.board_id==b.id, Tag.id.in_(tag_ids)).all()
             t.tags = tags
 
         session.commit()
@@ -391,7 +576,8 @@ def update_task(task_id):
     u, session = auth_user()
     data = request.get_json() or {}
     try:
-        t = session.query(Task).filter_by(id=task_id, user_id=u.id).first()
+        b = require_board(u, session)
+        t = session.query(Task).filter_by(id=task_id, user_id=u.id, board_id=b.id).first()
         if not t:
             abort(404, "task not found")
         if "title" in data:
@@ -408,7 +594,7 @@ def update_task(task_id):
             if new_status != t.status:
                 last = (
                     session.query(Task)
-                    .filter_by(user_id=u.id, status=new_status)
+                    .filter_by(user_id=u.id, board_id=b.id, status=new_status)
                     .order_by(Task.order_index.desc())
                     .first()
                 )
@@ -417,13 +603,19 @@ def update_task(task_id):
         if "order_index" in data:
             t.order_index = int(data["order_index"])
 
-        # sostituisci completamente le associazioni tag se passato "tag_ids"
         if "tag_ids" in data:
             tag_ids = data.get("tag_ids") or []
             if not isinstance(tag_ids, list):
                 abort(400, "tag_ids must be an array")
-            new_tags = session.query(Tag).filter(Tag.user_id==u.id, Tag.id.in_(tag_ids)).all() if tag_ids else []
+            new_tags = session.query(Tag).filter(
+                Tag.user_id==u.id, Tag.board_id==b.id, Tag.id.in_(tag_ids)
+            ).all() if tag_ids else []
             t.tags = new_tags
+        if "priority" in data:
+            new_prio = (data["priority"] or "").upper()
+            if new_prio not in VALID_PRIORITIES:
+                abort(400, "invalid priority")
+            t.priority = new_prio
 
         t.updated_at = datetime.utcnow()
         session.commit()
@@ -440,9 +632,10 @@ def reorder_tasks():
     if status not in VALID_STATUSES or not isinstance(ordered, list):
         abort(400, "invalid payload")
     try:
+        b = require_board(u, session)
         id_to_task = {
             t.id: t
-            for t in session.query(Task).filter_by(user_id=u.id, status=status).all()
+            for t in session.query(Task).filter_by(user_id=u.id, board_id=b.id, status=status).all()
         }
         for i, tid in enumerate(ordered):
             tid = int(tid)
@@ -458,7 +651,8 @@ def reorder_tasks():
 def delete_task(task_id):
     u, session = auth_user()
     try:
-        t = session.query(Task).filter_by(id=task_id, user_id=u.id).first()
+        b = require_board(u, session)
+        t = session.query(Task).filter_by(id=task_id, user_id=u.id, board_id=b.id).first()
         if not t:
             abort(404, "task not found")
         session.delete(t)

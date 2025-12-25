@@ -15,6 +15,8 @@ import UserAvatar from './components/UserAvatar'
 import TagManager from './components/TagManager'
 import TaskPanel from './components/TaskPanel'
 
+import BoardManager from './components/BoardManager'
+
 import './styles.css'
 
 const ROUTES = {
@@ -89,7 +91,7 @@ export default function App() {
   const [editingPriority, setEditingPriority] = useState('LOW')
 
   // --- Tabs ---
-  const [activeTab, setActiveTab] = useState('tasks') // 'tasks' | 'tags'
+  const [activeTab, setActiveTab] = useState('tasks') // 'tasks' | 'tags' | 'boards'
 
   // Normalizza hash al primo load
   useEffect(() => {
@@ -245,6 +247,37 @@ export default function App() {
     }
   }
 
+  const onDeleteBoard = async (id) => {
+    const b = boards.find(x => String(x.id) === String(id))
+    const label = b ? `“${b.title}”` : `ID ${id}`
+    if (!confirm(`Eliminare la board ${label}? Verranno eliminati anche i task/tag associati.`)) return
+
+    try {
+      await storage.deleteBoard(id)
+
+      setBoards(prev => prev.filter(x => String(x.id) !== String(id)))
+
+      // se elimini quella attiva: scegli fallback
+      if (String(activeBoardId) === String(id)) {
+        const remaining = boards.filter(x => String(x.id) !== String(id))
+        const nextId = remaining[0]?.id ? String(remaining[0].id) : ''
+        if (nextId) {
+          localStorage.setItem(LS_ACTIVE_BOARD_KEY, nextId)
+          setActiveBoardId(nextId)
+        } else {
+          localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
+          setActiveBoardId('')
+          setTasksApi([])
+          setTags([])
+        }
+      }
+    } catch (err) {
+      console.error('[BOARDS] deleteBoard failed:', err)
+      alert('Errore eliminazione board: ' + err.message)
+    }
+  }
+
+
   // --- Actions: TAGS ---
   async function onCreateTag(e){
     e.preventDefault()
@@ -269,7 +302,7 @@ export default function App() {
     const label = tag ? `“${tag.name}”` : `ID ${id}`
     if (!confirm(`Eliminare il tag ${label}?`)) return
     try {
-      if (isAPI) await storage.deleteTag(id)
+      if (isAPI) await storage.deleteTag(id, activeBoardId)
       setTags(prev => prev.filter(t => String(t.id) !== String(id)))
       setSelectedTagId(prev => String(prev) === String(id) ? '' : prev)
       setActiveTagFilterId(prev => String(prev) === String(id) ? null : prev)
@@ -376,7 +409,7 @@ export default function App() {
       payload.tag_ids = chosenTag ? [chosenTag.id] : []
       payload.priority = editingPriority
       const n = Number(id)
-      storage.updateTask(Number.isFinite(n) ? n : id, payload)
+      storage.updateTask(Number.isFinite(n) ? n : id, payload, activeBoardId)
         .catch(err => console.error('[TASKS] PATCH title/desc/priority failed:', err))
     }
   }
@@ -390,7 +423,7 @@ export default function App() {
       if (victim){ rest.filter(t=>t.status===victim.status).sort(byIndex).forEach((t,i)=> t.order_index=i) }
       return [...rest]
     })
-    if (isAPI) storage.deleteTask(id).catch(err => console.error('[TASKS] deleteTask failed:', err))
+    if (isAPI) storage.deleteTask(id, activeBoardId).catch(err => console.error('[TASKS] deleteTask failed:', err))
   }
 
   function moveTo(id, targetStatus){
@@ -405,7 +438,7 @@ export default function App() {
     })
     if (isAPI) {
       const n = Number(id)
-      storage.updateTask(Number.isFinite(n)? n : id, { status: targetStatus })
+      storage.updateTask(Number.isFinite(n)? n : id, { status: targetStatus }, activeBoardId)
         .catch(err => console.error('[TASKS] PATCH status failed:', err))
     }
   }
@@ -436,7 +469,7 @@ export default function App() {
 
   const counters = useMemo(() => ({ total: filtered.length }), [filtered])
   const { onCardDragStart, onColumnDragOver, onColumnDrop } =
-    useDragAndDrop(currentTasks, setCurrentTasks, storage)
+    useDragAndDrop(currentTasks, setCurrentTasks, storage, activeBoardId)
 
   // ---- Auth gating ----
   async function logout(){
@@ -520,39 +553,80 @@ export default function App() {
   return (
     <div className="container">
       <header className="header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h1 style={{ margin: 0 }}>Noteboard</h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
 
-          {/* Board selector (API) */}
-          {isAPI && (
-            <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
-              <select
-                className="btn"
-                value={activeBoardId}
-                onChange={(e) => selectBoard(e.target.value)}
-                title="Seleziona board"
-              >
-                {boards.map(b => (
-                  <option key={b.id} value={b.id}>{b.title}</option>
-                ))}
-              </select>
+          {/* Riga superiore: logo + selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ margin: 0 }}>Noteboard</h1>
 
-              <button
-                className="btn"
-                type="button"
-                onClick={() => {
-                  // torna al picker (senza logout)
-                  localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
-                  setActiveBoardId('')
+            {/* Board selector (API) */}
+            {isAPI && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <select
+                  className="btn"
+                  value={activeBoardId}
+                  onChange={(e) => selectBoard(e.target.value)}
+                  title="Seleziona board"
+                  style={{ fontWeight: 600 }}
+                >
+                  {boards.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {String(b.id) === String(activeBoardId) ? `✓ ${b.title}` : b.title}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
+                    setActiveBoardId('')
+                  }}
+                  title="Cambia board"
+                >
+                  Cambia
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Titolo board BEN VISIBILE (coerente, senza bordo/box) */}
+          {isAPI && activeBoardObj && (
+            <div
+              style={{
+                marginTop: 6,
+                padding: '10px 14px',
+                borderRadius: 12,
+                border: '1px solid rgba(59,130,246,0.35)',     // primary light
+                background: 'rgba(59,130,246,0.08)',          // primary soft
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                maxWidth: 420,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#1d4ed8', // primary scuro
+                  opacity: 0.9,
                 }}
-                title="Cambia board"
               >
-                Cambia
-              </button>
-
-              <span style={{ fontSize: 12, opacity: 0.75 }}>
-                {activeBoardObj ? `Board: ${activeBoardObj.title}` : ''}
-              </span>
+                Board attiva
+              </div>
+              <div
+                style={{
+                  fontSize: 24,
+                  fontWeight: 800,
+                  lineHeight: 1.1,
+                  letterSpacing: -0.2,
+                  color: '#0f172a', // quasi-black (leggibilità)
+                }}
+              >
+                {activeBoardObj.title}
+              </div>
             </div>
           )}
         </div>
@@ -561,7 +635,9 @@ export default function App() {
           <UserAvatar user={auth?.user} />
           <button className="btn" onClick={logout}>Logout</button>
         </div>
+
       </header>
+
 
       {/* TAB BAR */}
       <nav className="tabs">
@@ -579,10 +655,29 @@ export default function App() {
         >
           Tag Manager
         </button>
+        <button
+          type="button"
+          className={activeTab === 'boards' ? 'tab active' : 'tab'}
+          onClick={() => setActiveTab('boards')}
+        >
+          Board Manager
+        </button>
+
       </nav>
 
       {/* CONTENUTO SCHEDE */}
-      {activeTab === 'tags' ? (
+      {activeTab === 'boards' ? (
+          <BoardManager
+            isAPI={isAPI}
+            boards={boards}
+            activeBoardId={activeBoardId}
+            onSelectBoard={(id) => selectBoard(id)}
+            newBoardTitle={newBoardTitle}
+            setNewBoardTitle={setNewBoardTitle}
+            onCreateBoard={createBoard}
+            onDeleteBoard={onDeleteBoard}
+          />
+        ) : activeTab === 'tags' ? (
         <TagManager
           newTagName={newTagName}
           setNewTagName={setNewTagName}
