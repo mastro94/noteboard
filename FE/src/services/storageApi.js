@@ -39,10 +39,11 @@ export const storageApi = {
   },
 
   acceptInvite(token) {
-    return http(`/invites/${encodeURIComponent(token)}`, {
+    return http(`/invites/${encodeURIComponent(token)}/accept`, {
       method: 'POST',
     })
   },
+
 
   // --- TASKS ---
   listTasks(boardId) {
