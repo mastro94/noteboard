@@ -196,6 +196,7 @@ export default function App() {
   const canInvite = !isAPI ? false : boardRole === 'admin'
   const canCreateTask = !isAPI ? true : boardRole === 'admin' || boardRole === 'editor'
   const canAssignToOthers = !isAPI ? true : boardRole === 'admin' // editor solo a sé (enforced by BE)
+  const canRenameBoard = !isAPI ? false : boardRole === 'admin'
 
   // Normalizza hash al primo load
   useEffect(() => {
@@ -408,6 +409,28 @@ export default function App() {
     } catch (err) {
       console.error('[BOARDS] deleteBoard failed:', err)
       alert('Errore eliminazione board: ' + err.message)
+    }
+  }
+
+  const onRenameBoard = async (boardId, newTitle) => {
+    if (!isAPI) return
+    if (!canRenameBoard) {
+      alert('Permessi insufficienti.')
+      return
+    }
+
+    const title = (newTitle || '').trim()
+    if (!title) return
+
+    try {
+      const updated = await storage.renameBoard(boardId, { title }) // PATCH /boards/:id
+      setBoards((prev) =>
+        (prev || []).map((b) => (String(b.id) === String(boardId) ? { ...b, ...updated } : b))
+      )
+    } catch (err) {
+      console.error('[BOARDS] renameBoard failed:', err)
+      alert('Errore rinomina board: ' + (err?.message || 'unknown'))
+      throw err
     }
   }
 
@@ -951,6 +974,8 @@ export default function App() {
           onDeleteBoard={onDeleteBoard}
           onCreateInvite={onCreateInvite}
           canInvite={canInvite}
+          onRenameBoard={onRenameBoard}
+          canRename={canRenameBoard}
         />
       ) : activeTab === 'tags' ? (
         <TagManager

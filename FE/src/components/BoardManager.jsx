@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react'
+// BoardManager.jsx (MODIFICATO)
+import React, { useEffect, useMemo, useState } from 'react'
 
 export default function BoardManager({
   isAPI,
@@ -10,8 +11,13 @@ export default function BoardManager({
   onCreateBoard,
   onDeleteBoard,
 
-  // NEW
+  // invites
   onCreateInvite,
+  canInvite = true,
+
+  // rename
+  onRenameBoard,
+  canRename = true,
 }) {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('editor')
@@ -19,18 +25,28 @@ export default function BoardManager({
   const [inviteErr, setInviteErr] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
 
+  const [editTitle, setEditTitle] = useState('')
+  const [renameErr, setRenameErr] = useState('')
+  const [renameLoading, setRenameLoading] = useState(false)
+
   const activeBoard = useMemo(
-    () => boards.find(b => String(b.id) === String(activeBoardId)),
+    () => (boards || []).find(b => String(b.id) === String(activeBoardId)),
     [boards, activeBoardId]
   )
+  const activeTitle = activeBoard?.title || ''
+
+  useEffect(() => {
+    setEditTitle(activeTitle)
+    setRenameErr('')
+    setInviteErr('')
+    setInviteLink('')
+  }, [activeBoardId, activeTitle])
 
   if (!isAPI) {
     return (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Board Manager</h2>
-        <p style={{ opacity: 0.8 }}>
-          Disponibile solo in modalità API (VITE_MODE=api).
-        </p>
+        <p style={{ opacity: 0.8 }}>Disponibile solo in modalità API (VITE_MODE=api).</p>
       </div>
     )
   }
@@ -44,10 +60,11 @@ export default function BoardManager({
     if (!activeBoardId) return setInviteErr('Seleziona prima una board.')
     if (!email) return setInviteErr('Inserisci una email valida.')
     if (!onCreateInvite) return setInviteErr('onCreateInvite non configurata.')
+    if (!canInvite) return setInviteErr('Permessi insufficienti.')
 
     try {
       setInviteLoading(true)
-      const res = await onCreateInvite(activeBoardId, email, inviteRole) // { invite_link, ... }
+      const res = await onCreateInvite(activeBoardId, email, inviteRole)
       setInviteLink(res?.invite_link || '')
       setInviteEmail('')
     } catch (err) {
@@ -57,13 +74,29 @@ export default function BoardManager({
     }
   }
 
+  async function handleRenameSubmit(e) {
+    e.preventDefault()
+    setRenameErr('')
+
+    if (!activeBoardId) return setRenameErr('Seleziona prima una board.')
+    const t = (editTitle || '').trim()
+    if (!t) return setRenameErr('Inserisci un nome valido.')
+    if (!onRenameBoard) return setRenameErr('onRenameBoard non configurata.')
+    if (!canRename) return setRenameErr('Permessi insufficienti.')
+
+    try {
+      setRenameLoading(true)
+      await onRenameBoard(activeBoardId, t)
+    } catch (err) {
+      setRenameErr(err?.message || 'Rinomina non riuscita.')
+    } finally {
+      setRenameLoading(false)
+    }
+  }
+
   async function copyLink() {
     if (!inviteLink) return
-    try {
-      await navigator.clipboard.writeText(inviteLink)
-    } catch {
-      // fallback: selezione manuale
-    }
+    try { await navigator.clipboard.writeText(inviteLink) } catch {}
   }
 
   return (
@@ -81,12 +114,43 @@ export default function BoardManager({
         <button className="primaryBtn" type="submit">Crea</button>
       </form>
 
-      {/* INVITA (solo board attiva) */}
+      {/* RINOMINA */}
+      <div style={{ margin: '10px 0 14px' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Rinomina board</h3>
+          <span style={{ opacity: 0.8, fontSize: 12 }}>
+            Attiva: <b>{activeTitle || '—'}</b>
+          </span>
+        </div>
+
+        <form onSubmit={handleRenameSubmit} style={{ display:'flex', gap: 8, marginTop: 10, flexWrap:'wrap' }}>
+          <input
+            className="input"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            placeholder="Nuovo nome board…"
+            style={{ flex: 1, minWidth: 220 }}
+            disabled={!activeBoardId || !canRename}
+          />
+          <button
+            className="primaryBtn"
+            type="submit"
+            disabled={renameLoading || !activeBoardId || !canRename || !(editTitle || '').trim()}
+            title={!canRename ? 'Permessi insufficienti' : 'Rinomina'}
+          >
+            {renameLoading ? 'Salvo…' : 'Salva'}
+          </button>
+        </form>
+
+        {renameErr ? <div style={{ marginTop: 8, color: '#b42318', fontSize: 13 }}>{renameErr}</div> : null}
+      </div>
+
+      {/* INVITA */}
       <div style={{ margin: '10px 0 14px' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>Condividi board</h3>
           <span style={{ opacity: 0.8, fontSize: 12 }}>
-            Attiva: <b>{activeBoard?.title || '—'}</b>
+            Attiva: <b>{activeTitle || '—'}</b>
           </span>
         </div>
 
@@ -97,6 +161,7 @@ export default function BoardManager({
             onChange={(e) => setInviteEmail(e.target.value)}
             placeholder="Email da invitare…"
             style={{ flex: 1, minWidth: 220 }}
+            disabled={!canInvite}
           />
 
           <select
@@ -105,22 +170,19 @@ export default function BoardManager({
             onChange={(e) => setInviteRole(e.target.value)}
             title="Ruolo"
             style={{ fontWeight: 600 }}
+            disabled={!canInvite}
           >
             <option value="viewer">viewer</option>
             <option value="editor">editor</option>
             <option value="admin">admin</option>
           </select>
 
-          <button className="primaryBtn" type="submit" disabled={inviteLoading || !activeBoardId}>
+          <button className="primaryBtn" type="submit" disabled={inviteLoading || !activeBoardId || !canInvite}>
             {inviteLoading ? 'Invio…' : 'Invita'}
           </button>
         </form>
 
-        {inviteErr ? (
-          <div style={{ marginTop: 8, color: '#b42318', fontSize: 13 }}>
-            {inviteErr}
-          </div>
-        ) : null}
+        {inviteErr ? <div style={{ marginTop: 8, color: '#b42318', fontSize: 13 }}>{inviteErr}</div> : null}
 
         {inviteLink ? (
           <div style={{ marginTop: 10, padding: 10, borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)' }}>
@@ -135,7 +197,7 @@ export default function BoardManager({
 
       {/* LISTA BOARDS */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {boards.length ? boards.map(b => {
+        {boards?.length ? boards.map(b => {
           const isActive = String(b.id) === String(activeBoardId)
           return (
             <div
@@ -160,12 +222,7 @@ export default function BoardManager({
                 {b.title}{isActive ? ' (attiva)' : ''}
               </button>
 
-              <button
-                type="button"
-                className="btn"
-                onClick={() => onDeleteBoard(b.id)}
-                title="Elimina board"
-              >
+              <button type="button" className="btn" onClick={() => onDeleteBoard(b.id)} title="Elimina board">
                 🗑️
               </button>
             </div>
