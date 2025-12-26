@@ -14,7 +14,6 @@ import UserAvatar from './components/UserAvatar'
 
 import TagManager from './components/TagManager'
 import TaskPanel from './components/TaskPanel'
-
 import BoardManager from './components/BoardManager'
 
 import './styles.css'
@@ -24,7 +23,10 @@ const ROUTES = {
   signup: '#/signup',
   board:  '#/board',
   reset:  '#/reset',
+  invite: '#/invite', // NEW
 }
+
+const PENDING_INVITE_KEY = 'nb_pending_invite_token'
 
 // Palette colori fissa
 export const PRESET_COLORS = [
@@ -47,6 +49,88 @@ export const PRIORITY_EMOJI = {
   MEDIUM: '🟡',
   HIGH: '🟠',
   HIGHEST: '🔴',
+}
+
+function getHashQueryParam(name) {
+  const h = window.location.hash || ''
+  const qIndex = h.indexOf('?')
+  if (qIndex === -1) return null
+  const qs = h.slice(qIndex + 1)
+  return new URLSearchParams(qs).get(name)
+}
+
+function InvitePage({ token, onDone }) {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let abort = false
+    setErr('')
+    setData(null)
+    storage.previewInvite(token)
+      .then(d => { if (!abort) setData(d) })
+      .catch(e => { if (!abort) setErr(e?.message || 'Errore invito') })
+    return () => { abort = true }
+  }, [token])
+
+  async function accept() {
+    setErr('')
+    try {
+      setLoading(true)
+      const res = await storage.acceptInvite(token) // { ok, board_id }
+      onDone(res?.board_id)
+    } catch (e) {
+      setErr(e?.message || 'Accettazione non riuscita')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const boardTitle = data?.board?.title
+  const status = data?.status
+
+  return (
+    <div className="container">
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Invito a board</h2>
+
+        {err ? (
+          <div style={{ marginBottom: 10, color: '#b42318', fontSize: 13 }}>
+            {String(err)}
+          </div>
+        ) : null}
+
+        {boardTitle ? (
+          <>
+            <p style={{ margin: '8px 0' }}>
+              Board: <b>{boardTitle}</b>
+            </p>
+            <p style={{ margin: '8px 0', opacity: 0.85 }}>
+              Stato: <b>{status}</b>
+            </p>
+
+            <button
+              className="primaryBtn"
+              onClick={accept}
+              disabled={loading || status !== 'pending'}
+              title={status !== 'pending' ? 'Invito non più accettabile' : 'Accetta invito'}
+            >
+              {loading ? 'Accetto…' : 'Accetta invito'}
+            </button>
+          </>
+        ) : (
+          <p style={{ opacity: 0.7 }}>Caricamento invito…</p>
+        )}
+
+        <div style={{ marginTop: 10 }}>
+          <button className="btn" onClick={() => (window.location.hash = ROUTES.board)}>
+            Annulla
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function App() {
@@ -123,7 +207,12 @@ export default function App() {
           setTags([])
           setBoards([])
           setActiveBoardId('')
-          if (!route.startsWith(ROUTES.login) && !route.startsWith(ROUTES.signup) && !route.startsWith(ROUTES.reset)) {
+          if (
+            !route.startsWith(ROUTES.login) &&
+            !route.startsWith(ROUTES.signup) &&
+            !route.startsWith(ROUTES.reset) &&
+            !route.startsWith(ROUTES.invite)
+          ) {
             window.location.hash = ROUTES.login
           }
           return
@@ -133,7 +222,11 @@ export default function App() {
         const session = await exchangeFirebaseToken(idToken) // { token, user }
         localStorage.setItem('nb_token', session.token)
         setAuth({ token: session.token, user: session.user })
-        if (route.startsWith(ROUTES.login) || route.startsWith(ROUTES.signup) || route.startsWith(ROUTES.reset)) {
+
+        const pending = localStorage.getItem(PENDING_INVITE_KEY)
+        if (pending) {
+          window.location.hash = `${ROUTES.invite}?token=${encodeURIComponent(pending)}`
+        } else if (route.startsWith(ROUTES.login) || route.startsWith(ROUTES.signup) || route.startsWith(ROUTES.reset)) {
           window.location.hash = ROUTES.board
         }
       } catch (err) {
@@ -181,7 +274,7 @@ export default function App() {
       }
     })()
     return () => { abort = true }
-    // NB: NON mettere activeBoardId tra le dipendenze (evita loop)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAPI, auth?.token])
 
   // Quando cambia board: persisti + reset UI + carica tasks/tags
@@ -193,7 +286,6 @@ export default function App() {
 
     localStorage.setItem(LS_ACTIVE_BOARD_KEY, String(activeBoardId))
 
-    // reset “local UI state” legata alla board
     setTasksApi([])
     setTags([])
     setSelectedTagId('')
@@ -234,10 +326,10 @@ export default function App() {
   const createBoard = async (e) => {
     e.preventDefault()
     if (!isAPI) return
-    const title = newBoardTitle.trim()
-    if (!title) return
+    const t = newBoardTitle.trim()
+    if (!t) return
     try {
-      const created = await storage.createBoard({ title })
+      const created = await storage.createBoard({ title: t })
       setBoards(prev => [...prev, created])
       setNewBoardTitle('')
       selectBoard(created.id)
@@ -254,10 +346,8 @@ export default function App() {
 
     try {
       await storage.deleteBoard(id)
-
       setBoards(prev => prev.filter(x => String(x.id) !== String(id)))
 
-      // se elimini quella attiva: scegli fallback
       if (String(activeBoardId) === String(id)) {
         const remaining = boards.filter(x => String(x.id) !== String(id))
         const nextId = remaining[0]?.id ? String(remaining[0].id) : ''
@@ -277,6 +367,10 @@ export default function App() {
     }
   }
 
+  // --- Actions: INVITES ---
+  const onCreateInvite = async (boardId, email, role) => {
+    return storage.createInvite(boardId, { email, role })
+  }
 
   // --- Actions: TAGS ---
   async function onCreateTag(e){
@@ -508,11 +602,46 @@ export default function App() {
   const selectedTagObj = tags.find(t => String(t.id) === String(selectedTagId))
   const isFilterActive = activeTagFilterId && String(activeTagFilterId) === String(selectedTagId)
 
+  // ✅ INVITE pre-auth: se apro link e non sono loggato, salvo token e mando a login
+  if (!auth && route.startsWith(ROUTES.invite)) {
+    const token = getHashQueryParam('token')
+    if (token) localStorage.setItem(PENDING_INVITE_KEY, token)
+    window.location.hash = ROUTES.login
+    return null
+  }
+
   // Gate auth
   if (!auth) {
     if (route.startsWith(ROUTES.signup)) return <Register />
     if (route.startsWith(ROUTES.reset))  return <ResetPassword />
     return <Login />
+  }
+
+  // ✅ INVITE page (autenticato)
+  if (route.startsWith(ROUTES.invite)) {
+    const token = getHashQueryParam('token') || localStorage.getItem(PENDING_INVITE_KEY) || ''
+    if (!token) {
+      return (
+        <div className="container">
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Invito non valido</h2>
+            <button className="btn" onClick={() => (window.location.hash = ROUTES.board)}>Vai alla board</button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <InvitePage
+        token={token}
+        onDone={(boardId) => {
+          localStorage.removeItem(PENDING_INVITE_KEY)
+          // reload boards list (così la board condivisa appare subito)
+          storage.listBoards().then(list => setBoards(Array.isArray(list) ? list : [])).catch(()=>{})
+          if (boardId) selectBoard(boardId)
+          window.location.hash = ROUTES.board
+        }}
+      />
+    )
   }
 
   // ---- Board gating (API): se non selezionata, mostra picker ----
@@ -554,12 +683,9 @@ export default function App() {
     <div className="container">
       <header className="header">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-
-          {/* Riga superiore: logo + selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h1 style={{ margin: 0 }}>Noteboard</h1>
 
-            {/* Board selector (API) */}
             {isAPI && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <select
@@ -591,15 +717,14 @@ export default function App() {
             )}
           </div>
 
-          {/* Titolo board BEN VISIBILE (coerente, senza bordo/box) */}
           {isAPI && activeBoardObj && (
             <div
               style={{
                 marginTop: 6,
                 padding: '10px 14px',
                 borderRadius: 12,
-                border: '1px solid rgba(59,130,246,0.35)',     // primary light
-                background: 'rgba(59,130,246,0.08)',          // primary soft
+                border: '1px solid rgba(59,130,246,0.35)',
+                background: 'rgba(59,130,246,0.08)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 2,
@@ -610,7 +735,7 @@ export default function App() {
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  color: '#1d4ed8', // primary scuro
+                  color: '#1d4ed8',
                   opacity: 0.9,
                 }}
               >
@@ -622,7 +747,7 @@ export default function App() {
                   fontWeight: 800,
                   lineHeight: 1.1,
                   letterSpacing: -0.2,
-                  color: '#0f172a', // quasi-black (leggibilità)
+                  color: '#0f172a',
                 }}
               >
                 {activeBoardObj.title}
@@ -635,11 +760,8 @@ export default function App() {
           <UserAvatar user={auth?.user} />
           <button className="btn" onClick={logout}>Logout</button>
         </div>
-
       </header>
 
-
-      {/* TAB BAR */}
       <nav className="tabs">
         <button
           type="button"
@@ -662,22 +784,21 @@ export default function App() {
         >
           Board Manager
         </button>
-
       </nav>
 
-      {/* CONTENUTO SCHEDE */}
       {activeTab === 'boards' ? (
-          <BoardManager
-            isAPI={isAPI}
-            boards={boards}
-            activeBoardId={activeBoardId}
-            onSelectBoard={(id) => selectBoard(id)}
-            newBoardTitle={newBoardTitle}
-            setNewBoardTitle={setNewBoardTitle}
-            onCreateBoard={createBoard}
-            onDeleteBoard={onDeleteBoard}
-          />
-        ) : activeTab === 'tags' ? (
+        <BoardManager
+          isAPI={isAPI}
+          boards={boards}
+          activeBoardId={activeBoardId}
+          onSelectBoard={(id) => selectBoard(id)}
+          newBoardTitle={newBoardTitle}
+          setNewBoardTitle={setNewBoardTitle}
+          onCreateBoard={createBoard}
+          onDeleteBoard={onDeleteBoard}
+          onCreateInvite={onCreateInvite} // NEW
+        />
+      ) : activeTab === 'tags' ? (
         <TagManager
           newTagName={newTagName}
           setNewTagName={setNewTagName}
@@ -706,7 +827,6 @@ export default function App() {
         />
       )}
 
-      {/* info filtro attivo */}
       {activeTagFilterId && (
         <div style={{ margin: '4px 0 8px', fontSize: 13 }}>
           Filtrando per tag: <strong>
@@ -715,7 +835,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Board */}
       <div className="board">
         {STATUSES.map(s => (
           <Column

@@ -25,7 +25,24 @@ export const storageApi = {
   listBoards() { return http('/boards') },
   createBoard(payload) { return http('/boards', { method: 'POST', body: JSON.stringify(payload) }) },
   deleteBoard(id) { return http(`/boards/${id}`, { method: 'DELETE' }) },
-  // renameBoard(id, payload) { return http(`/boards/${id}`, { method:'PATCH', body: JSON.stringify(payload) }) },
+
+  // --- INVITES ---
+  createInvite(boardId, { email, role = 'editor' }) {
+    return http(`/boards/${boardId}/invites`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    })
+  },
+
+  previewInvite(token) {
+    return http(`/invites/${encodeURIComponent(token)}`)
+  },
+
+  acceptInvite(token) {
+    return http(`/invites/${encodeURIComponent(token)}`, {
+      method: 'POST',
+    })
+  },
 
   // --- TASKS ---
   listTasks(boardId) {
