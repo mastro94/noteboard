@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 
 export default function Card({
   task,
+
   isEditing,
   editingTitle,
   setEditingTitle,
@@ -9,19 +10,28 @@ export default function Card({
   setEditingDesc,
   onSaveEdit,
   onCancelEdit,
+
   onEditStart,
   onRemove,
   onMoveLeft,
   onMoveRight,
+
   onDragStart,
   disableLeft,
   disableRight,
+
   editingTagId,
   setEditingTagId,
   tagsList,
-  // priorità in edit (arrivano da Column -> App)
+
   editingPriority,
   setEditingPriority,
+
+  // ✅ permessi UI
+  canDrag = true,
+  canEdit = true,
+  canMove = true,
+  canDelete = true,
 }) {
   const [tagDropdownOpen, setTagDropdownOpen] = useState(false)
   const tagDropdownRef = useRef(null)
@@ -29,9 +39,7 @@ export default function Card({
   useEffect(() => {
     function onDocClick(e) {
       if (!tagDropdownRef.current) return
-      if (!tagDropdownRef.current.contains(e.target)) {
-        setTagDropdownOpen(false)
-      }
+      if (!tagDropdownRef.current.contains(e.target)) setTagDropdownOpen(false)
     }
     function onEsc(e) {
       if (e.key === 'Escape') setTagDropdownOpen(false)
@@ -46,107 +54,140 @@ export default function Card({
 
   const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'HIGHEST']
 
+  const chosenTag = (tagsList || []).find(t => String(t.id) === String(editingTagId))
+  const dragTitle = canDrag ? 'Trascina per spostare nella colonna desiderata' : 'Non hai i permessi per spostare questo task'
+
   return (
     <div
-      draggable
-      onDragStart={(e) => onDragStart(e, task)}
+      draggable={!!canDrag}
+      onDragStart={(e) => {
+        if (!canDrag) { e.preventDefault(); return }
+        onDragStart?.(e, task)
+      }}
       className="card"
-      title="Trascina per spostare nella colonna desiderata"
+      title={dragTitle}
+      style={!canDrag ? { opacity: 0.92, cursor: 'not-allowed' } : undefined}
     >
       {isEditing ? (
         <div>
-          <input className="input" value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} />
-          <textarea className="textarea" rows={3} value={editingDesc} onChange={(e) => setEditingDesc(e.target.value)} />
+          <input
+            className="input"
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            disabled={!canEdit}
+          />
+          <textarea
+            className="textarea"
+            rows={3}
+            value={editingDesc}
+            onChange={(e) => setEditingDesc(e.target.value)}
+            disabled={!canEdit}
+          />
 
-          {/* riga controlli: selettore tag (con anteprima colore) + priorità */}
+          {/* tag + priorità */}
           <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:8, flexWrap:'wrap' }}>
-            {/* dropdown custom per TAG con anteprima colore */}
+            {/* dropdown tag */}
             <div ref={tagDropdownRef} style={{ position:'relative' }}>
               <button
                 type="button"
                 className="tagSelectBtn"
-                onClick={() => setTagDropdownOpen(v => !v)}
+                onClick={() => canEdit && setTagDropdownOpen(v => !v)}
                 aria-haspopup="listbox"
                 aria-expanded={tagDropdownOpen}
                 title="Seleziona un tag (opzionale)"
+                disabled={!canEdit}
+                style={!canEdit ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
               >
-                {(() => {
-                  const chosen = (tagsList || []).find(t => String(t.id) === String(editingTagId))
-                  if (!chosen) {
-                    return (
-                      <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
-                        <span className="tagSwatch" style={{ background:'#e5e7eb' }} />
-                        <span>— nessun tag —</span>
-                      </span>
-                    )
-                  }
-                  return (
-                    <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
-                      <span className="tagSwatch" style={{ background: chosen.color || '#e5e7eb' }} />
-                      <span>{chosen.name}</span>
-                    </span>
-                  )
-                })()}
+                {!chosenTag ? (
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                    <span className="tagSwatch" style={{ background:'#e5e7eb' }} />
+                    <span>— nessun tag —</span>
+                  </span>
+                ) : (
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                    <span className="tagSwatch" style={{ background: chosenTag.color || '#e5e7eb' }} />
+                    <span>{chosenTag.name}</span>
+                  </span>
+                )}
                 <span aria-hidden="true" style={{ marginLeft:8 }}>▾</span>
               </button>
 
-              {tagDropdownOpen && (
-                <div className="tagMenu" role="listbox" tabIndex={-1}>
-                  <div
-                    role="option"
-                    aria-selected={String(editingTagId || '') === ''}
-                    className="tagMenuItem"
+              {tagDropdownOpen && canEdit ? (
+                <div
+                  role="listbox"
+                  style={{
+                    position:'absolute',
+                    top:'calc(100% + 6px)',
+                    left:0,
+                    zIndex:20,
+                    minWidth:260,
+                    maxHeight:220,
+                    overflow:'auto',
+                    borderRadius:10,
+                    border:'1px solid rgba(0,0,0,0.12)',
+                    background:'#fff',
+                    boxShadow:'0 10px 25px rgba(0,0,0,0.12)',
+                    padding:6,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ width:'100%', textAlign:'left' }}
                     onClick={() => { setEditingTagId(''); setTagDropdownOpen(false) }}
-                    title="Nessun tag"
                   >
-                    <span className="tagSwatch" style={{ background:'#e5e7eb' }} />
-                    <span>— nessun tag —</span>
-                  </div>
+                    — nessun tag —
+                  </button>
 
-                  {(tagsList || []).map(t => (
-                    <div
-                      key={t.id}
-                      role="option"
-                      aria-selected={String(editingTagId) === String(t.id)}
-                      className="tagMenuItem"
-                      onClick={() => { setEditingTagId(String(t.id)); setTagDropdownOpen(false) }}
-                      title={t.name}
+                  {(tagsList || []).map(tg => (
+                    <button
+                      key={tg.id}
+                      type="button"
+                      className="btn"
+                      style={{ width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}
+                      onClick={() => { setEditingTagId(String(tg.id)); setTagDropdownOpen(false) }}
                     >
-                      <span className="tagSwatch" style={{ background: t.color || '#e5e7eb' }} />
-                      <span>{t.name}</span>
-                    </div>
+                      <span className="tagSwatch" style={{ background: tg.color || '#e5e7eb' }} />
+                      <span>{tg.name}</span>
+                    </button>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
 
-            {/* selettore PRIORITÀ */}
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <label style={{ fontSize:12, opacity:.8 }}>Priorità</label>
-              <select
-                className="input"
-                value={editingPriority}
-                onChange={(e)=> setEditingPriority(e.target.value)}
-                title="Priorità"
-                style={{ minWidth: 160 }}
-              >
-                <option value="LOW">🟢 LOW</option>
-                <option value="MEDIUM">🟡 MEDIUM</option>
-                <option value="HIGH">🟠 HIGH</option>
-                <option value="HIGHEST">🔴 HIGHEST</option>
-              </select>
-            </div>
+            {/* priorità */}
+            <select
+              className="btn"
+              value={editingPriority || 'LOW'}
+              onChange={(e) => setEditingPriority(e.target.value)}
+              disabled={!canEdit}
+              title="Priorità"
+              style={{ fontWeight: 600 }}
+            >
+              {PRIORITIES.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
           </div>
 
-          <div className="cardActions">
-            <button className="primaryBtn" onClick={() => onSaveEdit(task.id)}>Salva</button>
+          <div className="cardActions" style={{ marginTop: 10 }}>
+            <button
+              className="primaryBtn"
+              onClick={() => onSaveEdit(task.id)}
+              disabled={!canEdit}
+              title={!canEdit ? 'Permessi insufficienti' : 'Salva'}
+            >
+              Salva
+            </button>
             <button className="btn" onClick={onCancelEdit}>Annulla</button>
           </div>
         </div>
       ) : (
         <div>
-          <div className="cardTitle">{task.title}</div>
-          {task.description && <div className="cardDesc">{task.description}</div>}
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{task.title}</div>
+          {task.description ? (
+            <div style={{ marginTop: 6, opacity: 0.9, whiteSpace:'pre-wrap' }}>{task.description}</div>
+          ) : null}
 
           {/* badge priorità */}
           {task.priority && (
@@ -174,7 +215,6 @@ export default function Card({
             </div>
           )}
 
-
           {/* chips tag */}
           {Array.isArray(task.tags) && task.tags.length > 0 && (
             <div className="tagsRow" style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -199,10 +239,38 @@ export default function Card({
           )}
 
           <div className="cardActions">
-            <button className="btn" onClick={() => onMoveLeft(task.id)} disabled={disableLeft}>⟵</button>
-            <button className="btn" onClick={() => onMoveRight(task.id)} disabled={disableRight}>⟶</button>
-            <button className="btn" onClick={() => onEditStart(task)}>Modifica</button>
-            <button className="dangerBtn" onClick={() => onRemove(task.id)}>Elimina</button>
+            <button
+              className="btn"
+              onClick={() => onMoveLeft(task.id)}
+              disabled={disableLeft || !canMove}
+              title={!canMove ? 'Permessi insufficienti' : 'Sposta a sinistra'}
+            >
+              ⟵
+            </button>
+            <button
+              className="btn"
+              onClick={() => onMoveRight(task.id)}
+              disabled={disableRight || !canMove}
+              title={!canMove ? 'Permessi insufficienti' : 'Sposta a destra'}
+            >
+              ⟶
+            </button>
+            <button
+              className="btn"
+              onClick={() => onEditStart(task)}
+              disabled={!canEdit}
+              title={!canEdit ? 'Permessi insufficienti' : 'Modifica'}
+            >
+              Modifica
+            </button>
+            <button
+              className="dangerBtn"
+              onClick={() => onRemove(task.id)}
+              disabled={!canDelete}
+              title={!canDelete ? 'Permessi insufficienti' : 'Elimina'}
+            >
+              Elimina
+            </button>
           </div>
         </div>
       )}

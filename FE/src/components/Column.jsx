@@ -9,12 +9,12 @@ export default function Column({
   onDragOver,
   onDrop,
 
-  // callback/props
   onRemove,
   onEditStart,
   onMoveLeft,
   onMoveRight,
   onDragStart,
+
   editingId,
   editingTitle,
   setEditingTitle,
@@ -22,16 +22,31 @@ export default function Column({
   setEditingDesc,
   onSaveEdit,
   onCancelEdit,
+
   editingTagId,
   setEditingTagId,
   tagsList,
 
-  // nuova gestione priorità in edit
   editingPriority,
   setEditingPriority,
+
+  // ✅ permessi
+  boardRole = 'viewer',
+  myUserId = null,
 }) {
   const safeTasks = Array.isArray(tasks) ? tasks : []
   const total = typeof counters?.total === 'number' ? counters.total : safeTasks.length
+
+  function canEditTask(t) {
+    if (!t) return false
+    if (boardRole === 'admin') return true
+    if (boardRole === 'viewer') return false
+    if (boardRole === 'editor') {
+      if (myUserId == null) return false
+      return String(t.user_id) === String(myUserId)
+    }
+    return false
+  }
 
   return (
     <div className="column" onDragOver={onDragOver} onDrop={onDrop}>
@@ -39,40 +54,50 @@ export default function Column({
         <h2 style={{ margin: 0 }}>{LABELS[status]}</h2>
         <span className="count">{safeTasks.length}/{total}</span>
       </div>
+
       <div>
-        {safeTasks.map((t) => (
-          <Card
-            key={t.id}
-            task={t}
-            disableLeft={status === 'todo'}
-            disableRight={status === 'done'}
+        {safeTasks.map((t) => {
+          const canEdit = canEditTask(t)
+          const canMove = canEdit
+          const canDelete = canEdit
+          const canDrag = canEdit
 
-            /* callback base */
-            onRemove={onRemove}
-            onEditStart={onEditStart}
-            onMoveLeft={onMoveLeft}
-            onMoveRight={onMoveRight}
-            onDragStart={onDragStart}
+          return (
+            <Card
+              key={t.id}
+              task={t}
+              disableLeft={status === 'todo'}
+              disableRight={status === 'done'}
 
-            /* stato di editing titolo/descrizione */
-            isEditing={editingId === t.id}
-            editingTitle={editingTitle}
-            setEditingTitle={setEditingTitle}
-            editingDesc={editingDesc}
-            setEditingDesc={setEditingDesc}
-            onSaveEdit={onSaveEdit}
-            onCancelEdit={onCancelEdit}
+              onRemove={onRemove}
+              onEditStart={onEditStart}
+              onMoveLeft={onMoveLeft}
+              onMoveRight={onMoveRight}
+              onDragStart={onDragStart}
 
-            /* tag in edit */
-            editingTagId={editingTagId}
-            setEditingTagId={setEditingTagId}
-            tagsList={tagsList}
+              isEditing={String(editingId) === String(t.id)}
+              editingTitle={editingTitle}
+              setEditingTitle={setEditingTitle}
+              editingDesc={editingDesc}
+              setEditingDesc={setEditingDesc}
+              onSaveEdit={onSaveEdit}
+              onCancelEdit={onCancelEdit}
 
-            /* priorità in edit */
-            editingPriority={editingPriority}
-            setEditingPriority={setEditingPriority}
-          />
-        ))}
+              editingTagId={editingTagId}
+              setEditingTagId={setEditingTagId}
+              tagsList={tagsList}
+
+              editingPriority={editingPriority}
+              setEditingPriority={setEditingPriority}
+
+              // ✅ nuove props
+              canDrag={canDrag}
+              canEdit={canEdit}
+              canMove={canMove}
+              canDelete={canDelete}
+            />
+          )
+        })}
       </div>
     </div>
   )

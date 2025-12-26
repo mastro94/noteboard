@@ -19,11 +19,11 @@ import BoardManager from './components/BoardManager'
 import './styles.css'
 
 const ROUTES = {
-  login:  '#/login',
+  login: '#/login',
   signup: '#/signup',
-  board:  '#/board',
-  reset:  '#/reset',
-  invite: '#/invite', // NEW
+  board: '#/board',
+  reset: '#/reset',
+  invite: '#/invite',
 }
 
 const PENDING_INVITE_KEY = 'nb_pending_invite_token'
@@ -42,7 +42,7 @@ export const PRESET_COLORS = [
   { hex: '#ec4899', name: 'Rosa' },
 ]
 
-// Priorità + emoji (per menu a tendina)
+// Priorità + emoji
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'HIGHEST']
 export const PRIORITY_EMOJI = {
   LOW: '🟢',
@@ -68,10 +68,17 @@ function InvitePage({ token, onDone }) {
     let abort = false
     setErr('')
     setData(null)
-    storage.previewInvite(token)
-      .then(d => { if (!abort) setData(d) })
-      .catch(e => { if (!abort) setErr(e?.message || 'Errore invito') })
-    return () => { abort = true }
+    storage
+      .previewInvite(token)
+      .then((d) => {
+        if (!abort) setData(d)
+      })
+      .catch((e) => {
+        if (!abort) setErr(e?.message || 'Errore invito')
+      })
+    return () => {
+      abort = true
+    }
   }, [token])
 
   async function accept() {
@@ -96,9 +103,7 @@ function InvitePage({ token, onDone }) {
         <h2 style={{ marginTop: 0 }}>Invito a board</h2>
 
         {err ? (
-          <div style={{ marginBottom: 10, color: '#b42318', fontSize: 13 }}>
-            {String(err)}
-          </div>
+          <div style={{ marginBottom: 10, color: '#b42318', fontSize: 13 }}>{String(err)}</div>
         ) : null}
 
         {boardTitle ? (
@@ -152,6 +157,9 @@ export default function App() {
   const [boards, setBoards] = useState([])
   const [newBoardTitle, setNewBoardTitle] = useState('')
 
+  // ✅ Role on board (admin/editor/viewer)
+  const [boardRole, setBoardRole] = useState('viewer')
+
   // --- New Task form ---
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
@@ -166,8 +174,8 @@ export default function App() {
   const [tags, setTags] = useState([])
   const [newTagName, setNewTagName] = useState('')
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0].hex)
-  const [selectedTagId, setSelectedTagId] = useState('')            // per nuovo task
-  const [activeTagFilterId, setActiveTagFilterId] = useState(null)  // filtro toggle
+  const [selectedTagId, setSelectedTagId] = useState('')
+  const [activeTagFilterId, setActiveTagFilterId] = useState(null)
   const [editingTagId, setEditingTagId] = useState('')
 
   // --- Priorità ---
@@ -207,6 +215,7 @@ export default function App() {
           setTags([])
           setBoards([])
           setActiveBoardId('')
+          setBoardRole('viewer')
           if (
             !route.startsWith(ROUTES.login) &&
             !route.startsWith(ROUTES.signup) &&
@@ -217,6 +226,7 @@ export default function App() {
           }
           return
         }
+
         const idToken = await getFirebaseIdToken()
         if (!idToken) return
         const session = await exchangeFirebaseToken(idToken) // { token, user }
@@ -242,9 +252,12 @@ export default function App() {
     const token = localStorage.getItem('nb_token')
     if (!isAPI || !token) return
     if (auth?.user) return
-    storage.me().then(user => {
-      setAuth(prev => prev ? { ...prev, user } : { token, user })
-    }).catch(err => console.error('[AUTH] /me failed:', err))
+    storage
+      .me()
+      .then((user) => {
+        setAuth((prev) => (prev ? { ...prev, user } : { token, user }))
+      })
+      .catch((err) => console.error('[AUTH] /me failed:', err))
   }, [isAPI, auth])
 
   // Carica BOARDS (API) e seleziona board valida (o prima)
@@ -261,7 +274,7 @@ export default function App() {
         setBoards(list)
 
         const saved = localStorage.getItem(LS_ACTIVE_BOARD_KEY) || ''
-        const savedValid = saved && list.some(b => String(b.id) === String(saved))
+        const savedValid = saved && list.some((b) => String(b.id) === String(saved))
         const fallback = list[0]?.id != null ? String(list[0].id) : ''
 
         const pick = savedValid ? String(saved) : fallback
@@ -273,11 +286,13 @@ export default function App() {
         console.error('[BOARDS] listBoards failed:', err)
       }
     })()
-    return () => { abort = true }
+    return () => {
+      abort = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAPI, auth?.token])
 
-  // Quando cambia board: persisti + reset UI + carica tasks/tags
+  // When board changes: load role + tasks/tags
   useEffect(() => {
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
@@ -296,10 +311,12 @@ export default function App() {
     let abort = false
     ;(async () => {
       try {
-        const [ts, tgs] = await Promise.all([
-          storage.listTasks(activeBoardId),
-          storage.listTags(activeBoardId),
-        ])
+        // 1) ruolo sulla board
+        const roleRes = await storage.getMyBoardRole(activeBoardId).catch(() => null)
+        if (!abort) setBoardRole(roleRes?.role || 'viewer')
+
+        // 2) tasks + tags (NOTA: storageApi.js deve chiamare /tasks?board_id= e /tags?board_id=
+        const [ts, tgs] = await Promise.all([storage.listTasks(activeBoardId), storage.listTags(activeBoardId)])
         if (abort) return
         setTasksApi(Array.isArray(ts) ? ts : [])
         setTags(Array.isArray(tgs) ? tgs : [])
@@ -308,12 +325,14 @@ export default function App() {
       }
     })()
 
-    return () => { abort = true }
+    return () => {
+      abort = true
+    }
   }, [isAPI, auth?.token, activeBoardId])
 
   // --- Actions: BOARDS ---
   const activeBoardObj = useMemo(
-    () => boards.find(b => String(b.id) === String(activeBoardId)),
+    () => boards.find((b) => String(b.id) === String(activeBoardId)),
     [boards, activeBoardId]
   )
 
@@ -330,7 +349,7 @@ export default function App() {
     if (!t) return
     try {
       const created = await storage.createBoard({ title: t })
-      setBoards(prev => [...prev, created])
+      setBoards((prev) => [...prev, created])
       setNewBoardTitle('')
       selectBoard(created.id)
     } catch (err) {
@@ -340,16 +359,16 @@ export default function App() {
   }
 
   const onDeleteBoard = async (id) => {
-    const b = boards.find(x => String(x.id) === String(id))
+    const b = boards.find((x) => String(x.id) === String(id))
     const label = b ? `“${b.title}”` : `ID ${id}`
     if (!confirm(`Eliminare la board ${label}? Verranno eliminati anche i task/tag associati.`)) return
 
     try {
       await storage.deleteBoard(id)
-      setBoards(prev => prev.filter(x => String(x.id) !== String(id)))
+      setBoards((prev) => prev.filter((x) => String(x.id) !== String(id)))
 
       if (String(activeBoardId) === String(id)) {
-        const remaining = boards.filter(x => String(x.id) !== String(id))
+        const remaining = boards.filter((x) => String(x.id) !== String(id))
         const nextId = remaining[0]?.id ? String(remaining[0].id) : ''
         if (nextId) {
           localStorage.setItem(LS_ACTIVE_BOARD_KEY, nextId)
@@ -359,6 +378,7 @@ export default function App() {
           setActiveBoardId('')
           setTasksApi([])
           setTags([])
+          setBoardRole('viewer')
         }
       }
     } catch (err) {
@@ -372,9 +392,31 @@ export default function App() {
     return storage.createInvite(boardId, { email, role })
   }
 
+  // ---- Permessi (FE) ----
+  const myUserId = auth?.user?.id ?? auth?.user?.user_id ?? auth?.user?.uid ?? null
+  const canInvite = !isAPI ? false : boardRole === 'admin'
+  const canCreateTask = !isAPI ? true : boardRole === 'admin' || boardRole === 'editor'
+
+  function assertCanEditTaskById(taskId) {
+    if (!isAPI) return true
+    if (boardRole === 'admin') return true
+    if (boardRole === 'viewer') return false
+    const t = (currentTasks || []).find((x) => String(x.id) === String(taskId))
+    if (!t) return false
+    if (boardRole === 'editor') {
+      if (myUserId == null) return false
+      return String(t.user_id) === String(myUserId)
+    }
+    return false
+  }
+
   // --- Actions: TAGS ---
-  async function onCreateTag(e){
+  async function onCreateTag(e) {
     e.preventDefault()
+    if (isAPI && boardRole !== 'admin') {
+      alert('Permessi insufficienti.')
+      return
+    }
     const name = newTagName.trim()
     if (!name) return
     try {
@@ -383,28 +425,32 @@ export default function App() {
         color: newTagColor || undefined,
         ...(isAPI ? { board_id: activeBoardId } : {}),
       })
-      setTags(prev => [...prev, created].sort((a,b)=>a.name.localeCompare(b.name)))
+      setTags((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
       setNewTagName('')
       setNewTagColor(PRESET_COLORS[0].hex)
-    } catch(err){
+    } catch (err) {
       alert('Errore creazione tag: ' + err.message)
     }
   }
 
-  async function onDeleteTag(id){
-    const tag = tags.find(t => String(t.id) === String(id))
+  async function onDeleteTag(id) {
+    if (isAPI && boardRole !== 'admin') {
+      alert('Permessi insufficienti.')
+      return
+    }
+    const tag = tags.find((t) => String(t.id) === String(id))
     const label = tag ? `“${tag.name}”` : `ID ${id}`
     if (!confirm(`Eliminare il tag ${label}?`)) return
     try {
       if (isAPI) await storage.deleteTag(id, activeBoardId)
-      setTags(prev => prev.filter(t => String(t.id) !== String(id)))
-      setSelectedTagId(prev => String(prev) === String(id) ? '' : prev)
-      setActiveTagFilterId(prev => String(prev) === String(id) ? null : prev)
-      setEditingTagId(prev => String(prev) === String(id) ? '' : prev)
-      setCurrentTasks(prev => {
-        const next = (prev || []).map(task => {
+      setTags((prev) => prev.filter((t) => String(t.id) !== String(id)))
+      setSelectedTagId((prev) => (String(prev) === String(id) ? '' : prev))
+      setActiveTagFilterId((prev) => (String(prev) === String(id) ? null : prev))
+      setEditingTagId((prev) => (String(prev) === String(id) ? '' : prev))
+      setCurrentTasks((prev) => {
+        const next = (prev || []).map((task) => {
           if (!Array.isArray(task.tags) || task.tags.length === 0) return task
-          const cleaned = task.tags.filter(t => String(t.id) !== String(id))
+          const cleaned = task.tags.filter((t) => String(t.id) !== String(id))
           if (cleaned.length === task.tags.length) return task
           return { ...task, tags: cleaned }
         })
@@ -412,24 +458,31 @@ export default function App() {
       })
     } catch (e) {
       console.error('[TAGS] delete failed:', e)
-      alert('Errore durante l’eliminazione del tag.')
+      alert("Errore durante l’eliminazione del tag.")
     }
   }
 
   // --- Actions: TASKS ---
   function addTask(e) {
     e.preventDefault()
+    if (isAPI && !canCreateTask) {
+      alert('Permessi insufficienti.')
+      return
+    }
+
     const t = title.trim()
     if (!t) return
     if (!PRIORITIES.includes(selectedPriority)) setSelectedPriority('LOW')
     if (isAPI && !localStorage.getItem('nb_token')) {
-      alert('Devi essere loggato per creare task.'); return
+      alert('Devi essere loggato per creare task.')
+      return
     }
     if (isAPI && !activeBoardId) {
-      alert('Seleziona prima una board.'); return
+      alert('Seleziona prima una board.')
+      return
     }
 
-    const chosenTag = tags.find(x => String(x.id) === String(selectedTagId))
+    const chosenTag = tags.find((x) => String(x.id) === String(selectedTagId))
     const newTask = {
       id: uid(),
       title: t,
@@ -441,38 +494,50 @@ export default function App() {
       tags: chosenTag ? [chosenTag] : [],
       priority: selectedPriority,
       board_id: activeBoardId || undefined,
+      user_id: myUserId || undefined,
     }
 
-    setCurrentTasks(prev => {
+    setCurrentTasks((prev) => {
       const next = [...prev, newTask]
-      next.filter(tt=>tt.status==='todo').sort(byIndex).forEach((tt,i)=> tt.order_index=i)
+      next
+        .filter((tt) => tt.status === 'todo')
+        .sort(byIndex)
+        .forEach((tt, i) => (tt.order_index = i))
       return next
     })
-    setTitle(''); setDesc('')
+    setTitle('')
+    setDesc('')
 
     if (isAPI) {
-      storage.createTask({
-        title: newTask.title,
-        description: newTask.description,
-        status: newTask.status,
-        tag_ids: chosenTag ? [chosenTag.id] : [],
-        priority: selectedPriority,
-        board_id: activeBoardId,
-      })
-      .then(created => {
-        setCurrentTasks(curr => {
-          const idx = curr.findIndex(x => x.title === newTask.title && x.created_at === newTask.created_at)
-          if (idx >= 0) {
-            const copy = [...curr]; copy[idx] = { ...created }; return copy
-          }
-          return curr
+      storage
+        .createTask({
+          title: newTask.title,
+          description: newTask.description,
+          status: newTask.status,
+          tag_ids: chosenTag ? [chosenTag.id] : [],
+          priority: selectedPriority,
+          board_id: activeBoardId,
         })
-      })
-      .catch(err => console.error('[TASKS] createTask failed:', err))
+        .then((created) => {
+          setCurrentTasks((curr) => {
+            const idx = curr.findIndex((x) => x.title === newTask.title && x.created_at === newTask.created_at)
+            if (idx >= 0) {
+              const copy = [...curr]
+              copy[idx] = { ...created }
+              return copy
+            }
+            return curr
+          })
+        })
+        .catch((err) => console.error('[TASKS] createTask failed:', err))
     }
   }
 
-  function startEdit(task){
+  function startEdit(task) {
+    if (isAPI && !assertCanEditTaskById(task.id)) {
+      alert('Permessi insufficienti.')
+      return
+    }
     setEditingId(task.id)
     setEditingTitle(task.title)
     setEditingDesc(task.description || '')
@@ -481,21 +546,30 @@ export default function App() {
   }
 
   function saveEdit(id) {
+    if (isAPI && !assertCanEditTaskById(id)) {
+      alert('Permessi insufficienti.')
+      return
+    }
+
     const newTitle = (editingTitle || '').trim()
-    const newDesc  = (editingDesc  || '').trim()
-    const chosenTag = tags.find(x => String(x.id) === String(editingTagId))
-    setCurrentTasks(prev => prev.map(t => {
-      if (t.id !== id) return t
-      return {
-        ...t,
-        title: (editingTitle || '').trim() || t.title,
-        description: (editingDesc || '').trim(),
-        updated_at: new Date().toISOString(),
-        tags: chosenTag ? [chosenTag] : [],
-        priority: editingPriority
-      }
-    }))
+    const newDesc = (editingDesc || '').trim()
+    const chosenTag = tags.find((x) => String(x.id) === String(editingTagId))
+
+    setCurrentTasks((prev) =>
+      prev.map((t) => {
+        if (String(t.id) !== String(id)) return t
+        return {
+          ...t,
+          title: newTitle || t.title,
+          description: newDesc,
+          updated_at: new Date().toISOString(),
+          tags: chosenTag ? [chosenTag] : [],
+          priority: editingPriority,
+        }
+      })
+    )
     setEditingId(null)
+
     if (isAPI) {
       const payload = {}
       if (newTitle) payload.title = newTitle
@@ -503,37 +577,57 @@ export default function App() {
       payload.tag_ids = chosenTag ? [chosenTag.id] : []
       payload.priority = editingPriority
       const n = Number(id)
-      storage.updateTask(Number.isFinite(n) ? n : id, payload, activeBoardId)
-        .catch(err => console.error('[TASKS] PATCH title/desc/priority failed:', err))
+      storage
+        .updateTask(Number.isFinite(n) ? n : id, payload, activeBoardId)
+        .catch((err) => console.error('[TASKS] PATCH title/desc/priority failed:', err))
     }
   }
 
-  function cancelEdit(){ setEditingId(null) }
-
-  function removeTask(id){
-    setCurrentTasks(prev => {
-      const victim = prev.find(t=>t.id===id)
-      const rest = prev.filter(t=>t.id!==id)
-      if (victim){ rest.filter(t=>t.status===victim.status).sort(byIndex).forEach((t,i)=> t.order_index=i) }
-      return [...rest]
-    })
-    if (isAPI) storage.deleteTask(id, activeBoardId).catch(err => console.error('[TASKS] deleteTask failed:', err))
+  function cancelEdit() {
+    setEditingId(null)
   }
 
-  function moveTo(id, targetStatus){
-    setCurrentTasks(prev => {
-      const next = prev.map(t => ({ ...t }))
-      const i = next.findIndex(t => t.id === id)
+  function removeTask(id) {
+    if (isAPI && !assertCanEditTaskById(id)) {
+      alert('Permessi insufficienti.')
+      return
+    }
+
+    setCurrentTasks((prev) => {
+      const victim = prev.find((t) => String(t.id) === String(id))
+      const rest = prev.filter((t) => String(t.id) !== String(id))
+      if (victim) {
+        rest
+          .filter((t) => t.status === victim.status)
+          .sort(byIndex)
+          .forEach((t, i) => (t.order_index = i))
+      }
+      return [...rest]
+    })
+    if (isAPI) storage.deleteTask(id, activeBoardId).catch((err) => console.error('[TASKS] deleteTask failed:', err))
+  }
+
+  function moveTo(id, targetStatus) {
+    if (isAPI && !assertCanEditTaskById(id)) {
+      alert('Permessi insufficienti.')
+      return
+    }
+
+    setCurrentTasks((prev) => {
+      const next = prev.map((t) => ({ ...t }))
+      const i = next.findIndex((t) => String(t.id) === String(id))
       if (i === -1) return prev
       if (next[i].status === targetStatus) return prev
       next[i].status = targetStatus
       next[i].updated_at = new Date().toISOString()
       return normalizeOrder(next)
     })
+
     if (isAPI) {
       const n = Number(id)
-      storage.updateTask(Number.isFinite(n)? n : id, { status: targetStatus }, activeBoardId)
-        .catch(err => console.error('[TASKS] PATCH status failed:', err))
+      storage
+        .updateTask(Number.isFinite(n) ? n : id, { status: targetStatus }, activeBoardId)
+        .catch((err) => console.error('[TASKS] PATCH status failed:', err))
     }
   }
 
@@ -543,13 +637,12 @@ export default function App() {
     const byText = (() => {
       if (!query.trim()) return base
       const q = query.toLowerCase()
-      return base.filter(t =>
-        (t?.title || '').toLowerCase().includes(q) ||
-        (t?.description || '').toLowerCase().includes(q)
+      return base.filter(
+        (t) => (t?.title || '').toLowerCase().includes(q) || (t?.description || '').toLowerCase().includes(q)
       )
     })()
     if (!activeTagFilterId) return byText
-    return byText.filter(t => Array.isArray(t.tags) && t.tags.some(tag => String(tag.id) === String(activeTagFilterId)))
+    return byText.filter((t) => Array.isArray(t.tags) && t.tags.some((tag) => String(tag.id) === String(activeTagFilterId)))
   }, [currentTasks, query, activeTagFilterId])
 
   const columns = useMemo(() => {
@@ -557,52 +650,68 @@ export default function App() {
     for (const t of filtered) {
       if (t.status === 'todo' || t.status === 'in_progress' || t.status === 'done') by[t.status].push(t)
     }
-    STATUSES.forEach(s => by[s].sort(byIndex))
+    STATUSES.forEach((s) => by[s].sort(byIndex))
     return by
   }, [filtered])
 
   const counters = useMemo(() => ({ total: filtered.length }), [filtered])
-  const { onCardDragStart, onColumnDragOver, onColumnDrop } =
-    useDragAndDrop(currentTasks, setCurrentTasks, storage, activeBoardId)
+
+  // ✅ permessi al drag hook
+  const { onCardDragStart, onColumnDragOver, onColumnDrop } = useDragAndDrop(currentTasks, setCurrentTasks, storage, activeBoardId, {
+    boardRole,
+    myUserId,
+  })
 
   // ---- Auth gating ----
-  async function logout(){
-    await logoutFirebase().catch(()=>{})
+  async function logout() {
+    await logoutFirebase().catch(() => {})
     localStorage.removeItem('nb_token')
     localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
     setActiveBoardId('')
+    setBoardRole('viewer')
     setAuth(null)
     window.location.hash = ROUTES.login
   }
 
   // ---- Tools helpers ----
-  function clearDone(){ setCurrentTasks(prev => prev.filter(t => t.status !== 'done')) }
-  function exportJSON(){
+  function clearDone() {
+    setCurrentTasks((prev) => prev.filter((t) => t.status !== 'done'))
+  }
+  function exportJSON() {
     const blob = new Blob([JSON.stringify(currentTasks, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'kanban-tasks.json'; a.click(); URL.revokeObjectURL(url)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'kanban-tasks.json'
+    a.click()
+    URL.revokeObjectURL(url)
   }
-  function importJSON(ev){
-    const f = ev.target.files?.[0]; if (!f) return
+  function importJSON(ev) {
+    const f = ev.target.files?.[0]
+    if (!f) return
     const reader = new FileReader()
-    reader.onload = () => { try {
-      const data = JSON.parse(reader.result); if (Array.isArray(data)) setCurrentTasks(normalizeOrder(data))
-    } catch { alert('File JSON non valido') } }
-    reader.readAsText(f); ev.target.value = ''
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result)
+        if (Array.isArray(data)) setCurrentTasks(normalizeOrder(data))
+      } catch {
+        alert('File JSON non valido')
+      }
+    }
+    reader.readAsText(f)
+    ev.target.value = ''
   }
 
-  function toggleTagFilter(){
+  function toggleTagFilter() {
     if (!selectedTagId) return
-    setActiveTagFilterId(prev =>
-      String(prev) === String(selectedTagId) ? null : selectedTagId
-    )
+    setActiveTagFilterId((prev) => (String(prev) === String(selectedTagId) ? null : selectedTagId))
   }
 
-  const sortedTags = useMemo(() => [...tags].sort((a,b)=>a.name.localeCompare(b.name)), [tags])
-  const selectedTagObj = tags.find(t => String(t.id) === String(selectedTagId))
+  const sortedTags = useMemo(() => [...tags].sort((a, b) => a.name.localeCompare(b.name)), [tags])
+  const selectedTagObj = tags.find((t) => String(t.id) === String(selectedTagId))
   const isFilterActive = activeTagFilterId && String(activeTagFilterId) === String(selectedTagId)
 
-  // ✅ INVITE pre-auth: se apro link e non sono loggato, salvo token e mando a login
+  // ✅ INVITE pre-auth
   if (!auth && route.startsWith(ROUTES.invite)) {
     const token = getHashQueryParam('token')
     if (token) localStorage.setItem(PENDING_INVITE_KEY, token)
@@ -613,7 +722,7 @@ export default function App() {
   // Gate auth
   if (!auth) {
     if (route.startsWith(ROUTES.signup)) return <Register />
-    if (route.startsWith(ROUTES.reset))  return <ResetPassword />
+    if (route.startsWith(ROUTES.reset)) return <ResetPassword />
     return <Login />
   }
 
@@ -625,7 +734,9 @@ export default function App() {
         <div className="container">
           <div className="card">
             <h2 style={{ marginTop: 0 }}>Invito non valido</h2>
-            <button className="btn" onClick={() => (window.location.hash = ROUTES.board)}>Vai alla board</button>
+            <button className="btn" onClick={() => (window.location.hash = ROUTES.board)}>
+              Vai alla board
+            </button>
           </div>
         </div>
       )
@@ -635,8 +746,10 @@ export default function App() {
         token={token}
         onDone={(boardId) => {
           localStorage.removeItem(PENDING_INVITE_KEY)
-          // reload boards list (così la board condivisa appare subito)
-          storage.listBoards().then(list => setBoards(Array.isArray(list) ? list : [])).catch(()=>{})
+          storage
+            .listBoards()
+            .then((list) => setBoards(Array.isArray(list) ? list : []))
+            .catch(() => {})
           if (boardId) selectBoard(boardId)
           window.location.hash = ROUTES.board
         }}
@@ -652,7 +765,9 @@ export default function App() {
           <h1>Noteboard</h1>
           <div className="header-right">
             <UserAvatar user={auth?.user} />
-            <button className="btn" onClick={logout}>Logout</button>
+            <button className="btn" onClick={logout}>
+              Logout
+            </button>
           </div>
         </header>
 
@@ -662,18 +777,24 @@ export default function App() {
           <input
             className="input"
             value={newBoardTitle}
-            onChange={(e)=>setNewBoardTitle(e.target.value)}
+            onChange={(e) => setNewBoardTitle(e.target.value)}
             placeholder="Nome board…"
           />
-          <button className="primaryBtn" type="submit">Crea</button>
+          <button className="primaryBtn" type="submit">
+            Crea
+          </button>
         </form>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {boards.length ? boards.map(b => (
-            <button key={b.id} className="btn" onClick={()=>selectBoard(b.id)}>
-              {b.title}
-            </button>
-          )) : <span style={{ opacity: 0.7 }}>Nessuna board. Creane una.</span>}
+          {boards.length ? (
+            boards.map((b) => (
+              <button key={b.id} className="btn" onClick={() => selectBoard(b.id)}>
+                {b.title}
+              </button>
+            ))
+          ) : (
+            <span style={{ opacity: 0.7 }}>Nessuna board. Creane una.</span>
+          )}
         </div>
       </div>
     )
@@ -695,7 +816,7 @@ export default function App() {
                   title="Seleziona board"
                   style={{ fontWeight: 600 }}
                 >
-                  {boards.map(b => (
+                  {boards.map((b) => (
                     <option key={b.id} value={b.id}>
                       {String(b.id) === String(activeBoardId) ? `✓ ${b.title}` : b.title}
                     </option>
@@ -728,18 +849,14 @@ export default function App() {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 2,
-                maxWidth: 420,
+                maxWidth: 520,
               }}
             >
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: '#1d4ed8',
-                  opacity: 0.9,
-                }}
-              >
-                Board attiva
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#1d4ed8', opacity: 0.9 }}>Board attiva</div>
+                <div style={{ fontSize: 12, opacity: 0.85 }}>
+                  Ruolo: <b>{boardRole}</b>
+                </div>
               </div>
               <div
                 style={{
@@ -758,30 +875,20 @@ export default function App() {
 
         <div className="header-right">
           <UserAvatar user={auth?.user} />
-          <button className="btn" onClick={logout}>Logout</button>
+          <button className="btn" onClick={logout}>
+            Logout
+          </button>
         </div>
       </header>
 
       <nav className="tabs">
-        <button
-          type="button"
-          className={activeTab === 'tasks' ? 'tab active' : 'tab'}
-          onClick={() => setActiveTab('tasks')}
-        >
+        <button type="button" className={activeTab === 'tasks' ? 'tab active' : 'tab'} onClick={() => setActiveTab('tasks')}>
           Nuovo Task & Ricerca
         </button>
-        <button
-          type="button"
-          className={activeTab === 'tags' ? 'tab active' : 'tab'}
-          onClick={() => setActiveTab('tags')}
-        >
+        <button type="button" className={activeTab === 'tags' ? 'tab active' : 'tab'} onClick={() => setActiveTab('tags')}>
           Tag Manager
         </button>
-        <button
-          type="button"
-          className={activeTab === 'boards' ? 'tab active' : 'tab'}
-          onClick={() => setActiveTab('boards')}
-        >
+        <button type="button" className={activeTab === 'boards' ? 'tab active' : 'tab'} onClick={() => setActiveTab('boards')}>
           Board Manager
         </button>
       </nav>
@@ -796,7 +903,8 @@ export default function App() {
           setNewBoardTitle={setNewBoardTitle}
           onCreateBoard={createBoard}
           onDeleteBoard={onDeleteBoard}
-          onCreateInvite={onCreateInvite} // NEW
+          onCreateInvite={onCreateInvite}
+          canInvite={canInvite}
         />
       ) : activeTab === 'tags' ? (
         <TagManager
@@ -811,32 +919,39 @@ export default function App() {
         />
       ) : (
         <TaskPanel
-          title={title} setTitle={setTitle}
-          desc={desc} setDesc={setDesc}
+          title={title}
+          setTitle={setTitle}
+          desc={desc}
+          setDesc={setDesc}
           addTask={addTask}
-          query={query} setQuery={setQuery}
-          exportJSON={exportJSON} importJSON={importJSON}
+          query={query}
+          setQuery={setQuery}
+          exportJSON={exportJSON}
+          importJSON={importJSON}
           clearDone={clearDone}
           tags={sortedTags}
-          selectedTagId={selectedTagId} setSelectedTagId={setSelectedTagId}
+          selectedTagId={selectedTagId}
+          setSelectedTagId={setSelectedTagId}
           selectedTagObj={selectedTagObj}
           isFilterActive={!!isFilterActive}
           toggleTagFilter={toggleTagFilter}
-          selectedPriority={selectedPriority} setSelectedPriority={setSelectedPriority}
+          selectedPriority={selectedPriority}
+          setSelectedPriority={setSelectedPriority}
           PRIORITY_EMOJI={PRIORITY_EMOJI}
+          canCreateTask={canCreateTask}
         />
       )}
 
       {activeTagFilterId && (
         <div style={{ margin: '4px 0 8px', fontSize: 13 }}>
-          Filtrando per tag: <strong>
-            {tags.find(t => String(t.id) === String(activeTagFilterId))?.name || activeTagFilterId}
-          </strong> — clic su “Mostra tutti” per rimuovere il filtro.
+          Filtrando per tag:{' '}
+          <strong>{tags.find((t) => String(t.id) === String(activeTagFilterId))?.name || activeTagFilterId}</strong> — clic
+          su “Mostra tutti” per rimuovere il filtro.
         </div>
       )}
 
       <div className="board">
-        {STATUSES.map(s => (
+        {STATUSES.map((s) => (
           <Column
             key={s}
             status={s}
@@ -847,8 +962,8 @@ export default function App() {
             onDrop={() => onColumnDrop(s)}
             onRemove={removeTask}
             onEditStart={startEdit}
-            onMoveLeft={(id)=>moveTo(id, s === 'done' ? 'in_progress' : 'todo')}
-            onMoveRight={(id)=>moveTo(id, s === 'todo' ? 'in_progress' : 'done')}
+            onMoveLeft={(id) => moveTo(id, s === 'done' ? 'in_progress' : 'todo')}
+            onMoveRight={(id) => moveTo(id, s === 'todo' ? 'in_progress' : 'done')}
             onDragStart={onCardDragStart}
             editingId={editingId}
             editingTitle={editingTitle}
@@ -862,6 +977,8 @@ export default function App() {
             tagsList={sortedTags}
             editingPriority={editingPriority}
             setEditingPriority={setEditingPriority}
+            boardRole={boardRole}
+            myUserId={myUserId}
           />
         ))}
       </div>

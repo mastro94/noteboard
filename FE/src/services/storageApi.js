@@ -1,80 +1,96 @@
-// FE/src/services/storageApi.js
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
+const API_BASE = import.meta.env.VITE_API_BASE || ''
 
-function authHeader() {
-  const t = localStorage.getItem('nb_token')
-  return t ? { Authorization: `Bearer ${t}` } : {}
+function getToken() {
+  return localStorage.getItem('nb_token') || ''
 }
 
-async function http(path, opts = {}) {
-  const res = await fetch(`${API_BASE}${path.startsWith('/') ? path : '/' + path}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeader(), ...(opts.headers || {}) },
-    ...opts,
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${text}`)
+async function fetchJSON(path, opts = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(opts.headers || {}),
   }
-  return res.status === 204 ? null : res.json()
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers })
+  const text = await res.text()
+  let data = null
+  try { data = text ? JSON.parse(text) : null } catch { data = text }
+
+  if (!res.ok) {
+    const msg = (data && (data.message || data.error)) || `HTTP ${res.status}`
+    const err = new Error(msg)
+    err.status = res.status
+    err.data = data
+    throw err
+  }
+  return data
 }
 
 export const storageApi = {
   mode: 'api',
 
-  // --- BOARDS ---
-  listBoards() { return http('/boards') },
-  createBoard(payload) { return http('/boards', { method: 'POST', body: JSON.stringify(payload) }) },
-  deleteBoard(id) { return http(`/boards/${id}`, { method: 'DELETE' }) },
-
-  // --- INVITES ---
-  createInvite(boardId, { email, role = 'editor' }) {
-    return http(`/boards/${boardId}/invites`, {
-      method: 'POST',
-      body: JSON.stringify({ email, role }),
-    })
+  me() {
+    return fetchJSON('/me', { method: 'GET' })
   },
 
-  previewInvite(token) {
-    return http(`/invites/${encodeURIComponent(token)}`)
+  // boards
+  listBoards() {
+    return fetchJSON('/boards', { method: 'GET' })
+  },
+  createBoard(payload) {
+    return fetchJSON('/boards', { method: 'POST', body: JSON.stringify(payload) })
+  },
+  deleteBoard(boardId) {
+    return fetchJSON(`/boards/${boardId}`, { method: 'DELETE' })
   },
 
-  acceptInvite(token) {
-    return http(`/invites/${encodeURIComponent(token)}/accept`, {
-      method: 'POST',
-    })
+  // ✅ ruolo utente su board (serve endpoint BE; vedi sotto)
+  getMyBoardRole(boardId) {
+    return fetchJSON(`/boards/${encodeURIComponent(boardId)}/my-role`, { method: 'GET' })
   },
 
-
-  // --- TASKS ---
+  // tasks (BE: /tasks + board_id)
   listTasks(boardId) {
-    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
-    return http(`/tasks${q}`)
+    return fetchJSON(`/tasks?board_id=${encodeURIComponent(boardId)}`, { method: 'GET' })
   },
-  createTask(payload) { return http('/tasks', { method:'POST', body: JSON.stringify(payload) }) },
-  updateTask(id, payload, boardId) {
-    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
-    return http(`/tasks/${id}${q}`, { method:'PATCH', body: JSON.stringify(payload) })
+  createTask(payload) {
+    // BE prende board_id dal body
+    return fetchJSON(`/tasks`, { method: 'POST', body: JSON.stringify(payload) })
   },
-  deleteTask(id, boardId) {
-    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
-    return http(`/tasks/${id}${q}`, { method:'DELETE' })
+  updateTask(taskId, payload, boardId) {
+    // BE richiede board_id in query o body (helper prende anche da body, ma qui usiamo query)
+    return fetchJSON(
+      `/tasks/${encodeURIComponent(taskId)}?board_id=${encodeURIComponent(boardId)}`,
+      { method: 'PATCH', body: JSON.stringify(payload) }
+    )
+  },
+  deleteTask(taskId, boardId) {
+    return fetchJSON(`/tasks/${encodeURIComponent(taskId)}?board_id=${encodeURIComponent(boardId)}`, { method: 'DELETE' })
   },
 
-  // --- TAGS ---
+  // tags (BE: /tags + board_id)
   listTags(boardId) {
-    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
-    return http(`/tags${q}`)
+    return fetchJSON(`/tags?board_id=${encodeURIComponent(boardId)}`, { method: 'GET' })
   },
-  createTag(payload) { return http('/tags', { method:'POST', body: JSON.stringify(payload) }) },
-  updateTag(id, payload, boardId) {
-    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
-    return http(`/tags/${id}${q}`, { method:'PATCH', body: JSON.stringify(payload) })
+  createTag(payload) {
+    // BE prende board_id dal body
+    return fetchJSON(`/tags`, { method: 'POST', body: JSON.stringify(payload) })
   },
-  deleteTag(id, boardId) {
-    const q = boardId ? `?board_id=${encodeURIComponent(boardId)}` : ''
-    return http(`/tags/${id}${q}`, { method:'DELETE' })
+  deleteTag(tagId, boardId) {
+    return fetchJSON(`/tags/${encodeURIComponent(tagId)}?board_id=${encodeURIComponent(boardId)}`, { method: 'DELETE' })
   },
 
-  // --- USER ---
-  me() { return http('/me') },
+  // invites (già coerenti col BE)
+  createInvite(boardId, payload) {
+    return fetchJSON(`/boards/${boardId}/invites`, { method: 'POST', body: JSON.stringify(payload) })
+  },
+  previewInvite(token) {
+    return fetchJSON(`/invites/${encodeURIComponent(token)}`, { method: 'GET' })
+  },
+  acceptInvite(token) {
+    return fetchJSON(`/invites/${encodeURIComponent(token)}/accept`, { method: 'POST' })
+  },
 }
+
+export default storageApi
