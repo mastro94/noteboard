@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 
 export default function Card({
   task,
@@ -26,6 +26,12 @@ export default function Card({
 
   editingPriority,
   setEditingPriority,
+
+  // ✅ NEW: assignee
+  boardUsers = [],
+  editingAssigneeId,
+  setEditingAssigneeId,
+  canAssign = true,
 
   // ✅ permessi UI
   canDrag = true,
@@ -57,6 +63,15 @@ export default function Card({
   const chosenTag = (tagsList || []).find(t => String(t.id) === String(editingTagId))
   const dragTitle = canDrag ? 'Trascina per spostare nella colonna desiderata' : 'Non hai i permessi per spostare questo task'
 
+  const assigneeObj = useMemo(() => {
+    const id = task?.assignee_id
+    if (id == null || id === '') return null
+    return (boardUsers || []).find(u => String(u.id) === String(id)) || null
+  }, [task?.assignee_id, boardUsers])
+
+  const canEditAssignee = !!canEdit && !!canAssign
+  const safeBoardUsers = Array.isArray(boardUsers) ? boardUsers : []
+
   return (
     <div
       draggable={!!canDrag}
@@ -84,7 +99,7 @@ export default function Card({
             disabled={!canEdit}
           />
 
-          {/* tag + priorità */}
+          {/* tag + priorità + assignee */}
           <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:8, flexWrap:'wrap' }}>
             {/* dropdown tag */}
             <div ref={tagDropdownRef} style={{ position:'relative' }}>
@@ -168,6 +183,24 @@ export default function Card({
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
+
+            {/* ✅ assignee */}
+            <select
+              className="btn"
+              value={String(editingAssigneeId ?? '')}
+              onChange={(e) => setEditingAssigneeId?.(e.target.value)}
+              disabled={!canEditAssignee}
+              title={!canEditAssignee ? 'Permessi insufficienti' : 'Assegna a'}
+              style={{ fontWeight: 600, minWidth: 200 }}
+            >
+              <option value="">— Non assegnato —</option>
+              {safeBoardUsers.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.username || u.email || `User ${u.id}`}
+                  {u.role ? ` (${u.role})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="cardActions" style={{ marginTop: 10 }}>
@@ -185,9 +218,34 @@ export default function Card({
       ) : (
         <div>
           <div style={{ fontWeight: 800, fontSize: 16 }}>{task.title}</div>
+
           {task.description ? (
             <div style={{ marginTop: 6, opacity: 0.9, whiteSpace:'pre-wrap' }}>{task.description}</div>
           ) : null}
+
+          {/* ✅ assignee (view) */}
+          {task.assignee_id != null && task.assignee_id !== '' && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <span
+                className="tagChip"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '2px 10px',
+                  borderRadius: 999,
+                  fontSize: 12,
+                  lineHeight: '18px',
+                  backgroundColor: '#eef2ff',
+                  color: '#111827'
+                }}
+                title={`Assegnato a: ${assigneeObj?.username || assigneeObj?.email || task.assignee_id}`}
+              >
+                👤 <span style={{ fontWeight: 700 }}>Assignee:</span>{' '}
+                <span>{assigneeObj?.username || assigneeObj?.email || task.assignee_id}</span>
+              </span>
+            </div>
+          )}
 
           {/* badge priorità */}
           {task.priority && (

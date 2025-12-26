@@ -12,51 +12,66 @@ export default function TaskPanel({
   selectedTagObj,
   isFilterActive, toggleTagFilter,
   selectedPriority, setSelectedPriority,
-  PRIORITY_EMOJI
+  PRIORITY_EMOJI,
+
+  // ✅ assignee
+  boardUsers = [],
+  selectedAssigneeId = '',
+  setSelectedAssigneeId = () => {},
+  canAssign = true,
 }) {
+  const safeUsers = Array.isArray(boardUsers) ? boardUsers : []
+
   return (
     <section className="toolbar" style={{ gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       {/* NUOVO TASK */}
       <form className="card addForm" onSubmit={addTask} style={{ gap: 12 }}>
-        <div className="row" style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+        <div className="row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input
             className="input"
             placeholder="Titolo del task…"
             value={title}
-            onChange={e=>setTitle(e.target.value)}
+            onChange={(e) => setTitle(e.target.value)}
             required
           />
+
           <input
             className="input"
             placeholder="Descrizione (opzionale)"
             value={desc}
-            onChange={e=>setDesc(e.target.value)}
+            onChange={(e) => setDesc(e.target.value)}
           />
 
           {/* Tag select */}
           <select
             className="input"
             value={selectedTagId}
-            onChange={(e)=> setSelectedTagId(e.target.value)}
+            onChange={(e) => setSelectedTagId(e.target.value)}
             title="Seleziona un tag (opzionale)"
             style={{ minWidth: 180 }}
           >
             <option value="">— nessun tag —</option>
-            {tags.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+            {tags.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
             ))}
           </select>
 
           {/* badge colore tag selezionato */}
-          {selectedTagObj && (
-            <span title={`Colore ${selectedTagObj.color}`} className="colorBadge" style={{ background:selectedTagObj.color || '#e5e7eb' }} />
-          )}
+          {selectedTagObj ? (
+            <span
+              title={`Colore ${selectedTagObj.color}`}
+              className="colorBadge"
+              style={{ background: selectedTagObj.color || '#e5e7eb' }}
+            />
+          ) : null}
 
           {/* Priorità con emoji */}
           <select
             className="input"
             value={selectedPriority}
-            onChange={(e)=> setSelectedPriority(e.target.value)}
+            onChange={(e) => setSelectedPriority(e.target.value)}
             title="Priorità"
             style={{ minWidth: 170 }}
           >
@@ -64,6 +79,23 @@ export default function TaskPanel({
             <option value="MEDIUM">{PRIORITY_EMOJI.MEDIUM} MEDIUM</option>
             <option value="HIGH">{PRIORITY_EMOJI.HIGH} HIGH</option>
             <option value="HIGHEST">{PRIORITY_EMOJI.HIGHEST} HIGHEST</option>
+          </select>
+
+          {/* ✅ Assignee select */}
+          <select
+            className="input"
+            value={selectedAssigneeId ?? ''}
+            onChange={(e) => setSelectedAssigneeId(e.target.value)}
+            title={canAssign ? 'Assegna a (opzionale)' : 'Non hai permessi per assegnare'}
+            style={{ minWidth: 210 }}
+            disabled={!canAssign}
+          >
+            <option value="">— non assegnato —</option>
+            {safeUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.username || u.email || `User ${u.id}`}{u.role ? ` (${u.role})` : ''}
+              </option>
+            ))}
           </select>
 
           {/* filtro rapido sul tag selezionato */}
@@ -76,18 +108,25 @@ export default function TaskPanel({
             {isFilterActive ? 'Mostra tutti' : 'Filtra per tag selezionato'}
           </button>
 
-          <button className="primaryBtn" type="submit">Aggiungi</button>
+          <button className="primaryBtn" type="submit">
+            Aggiungi
+          </button>
         </div>
       </form>
 
       {/* STRUMENTI */}
-      <div className="card toolsRight" style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-        <input className="input" placeholder="🔎 Cerca…" value={query} onChange={e=>setQuery(e.target.value)} />
-        <button className="btn" onClick={exportJSON}>Export JSON</button>
-        <label className="importLabel">Import JSON
+      <div className="card toolsRight" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="input" placeholder="🔎 Cerca…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <button className="btn" onClick={exportJSON}>
+          Export JSON
+        </button>
+        <label className="importLabel">
+          Import JSON
           <input type="file" accept="application/json" style={{ display: 'none' }} onChange={importJSON} />
         </label>
-        <button className="warnBtn" onClick={clearDone}>Svuota Done</button>
+        <button className="warnBtn" onClick={clearDone}>
+          Svuota Done
+        </button>
       </div>
     </section>
   )

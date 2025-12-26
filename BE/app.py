@@ -79,15 +79,32 @@ Base = declarative_base()
 # ------------------ MODELS ------------------
 class User(Base):
     __tablename__ = "users"
+
     id            = Column(Integer, primary_key=True)
     email         = Column(String(255), unique=True, nullable=False)
-    username      = Column(String(50),  unique=True, nullable=False)
+    username      = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     is_verified   = Column(Boolean, default=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
-    tasks         = relationship("Task", backref="user", cascade="all,delete")
-    tags          = relationship("Tag", backref="user", cascade="all,delete")
-    boards        = relationship("Board", backref="user", cascade="all,delete")
+
+    # task creati dall’utente
+    tasks = relationship(
+        "Task",
+        back_populates="creator",
+        cascade="all,delete",
+        foreign_keys="Task.user_id",
+    )
+
+    # task assegnati all’utente (può essere vuoto)
+    assigned_tasks = relationship(
+        "Task",
+        back_populates="assignee",
+        foreign_keys="Task.assignee_id",
+    )
+
+    tags   = relationship("Tag", backref="user", cascade="all,delete")
+    boards = relationship("Board", backref="user", cascade="all,delete")
+
 
 
 class Board(Base):
@@ -122,8 +139,9 @@ class BoardInvite(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+
     id          = Column(Integer, primary_key=True)
-    user_id     = Column(Integer, ForeignKey("users.id"), nullable=False)  # owner of the task
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=False)   # creator
     board_id    = Column(Integer, ForeignKey("boards.id"), nullable=False)
     title       = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
@@ -132,6 +150,22 @@ class Task(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow)
     priority    = Column(String(10), nullable=False, default="LOW")
+
+    # assignee (opzionale)
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # relazioni esplicite
+    creator = relationship(
+        "User",
+        back_populates="tasks",
+        foreign_keys=[user_id],
+    )
+    assignee = relationship(
+        "User",
+        back_populates="assigned_tasks",
+        foreign_keys=[assignee_id],
+    )
+
 
 
 class TaskTag(Base):
@@ -175,6 +209,11 @@ def _bootstrap_schema():
 
         if _sqlite_table_exists(session, "tags") and not _sqlite_column_exists(session, "tags", "board_id"):
             session.execute(text("ALTER TABLE tags ADD COLUMN board_id INTEGER"))
+            session.commit()
+
+        # ✅ NEW: migrate assignee_id
+        if _sqlite_table_exists(session, "tasks") and not _sqlite_column_exists(session, "tasks", "assignee_id"):
+            session.execute(text("ALTER TABLE tasks ADD COLUMN assignee_id INTEGER"))
             session.commit()
 
         if not _sqlite_table_exists(session, "board_members") or not _sqlite_table_exists(session, "board_invites"):
@@ -271,6 +310,16 @@ def require_role(role: str, allowed: set):
     if role not in allowed:
         abort(403, "forbidden")
 
+def _is_user_in_board(session, board_id: int, user_id: int) -> bool:
+    """True if user_id is board owner OR a member of board_id."""
+    b = session.query(Board).filter_by(id=board_id).first()
+    if not b:
+        return False
+    if b.user_id == user_id:
+        return True
+    m = session.query(BoardMember).filter_by(board_id=board_id, user_id=user_id).first()
+    return m is not None
+
 def t_board(b: "Board"):
     return {"id": b.id, "title": b.title, "created_at": b.created_at.isoformat() if b.created_at else None}
 
@@ -290,6 +339,8 @@ def t_task(t: Task):
         "priority": t.priority,
         "board_id": t.board_id,
         "user_id": t.user_id,
+        # ✅ NEW
+        "assignee_id": t.assignee_id,
     }
 
 # ------------------ PUBLIC ------------------
@@ -493,6 +544,48 @@ def my_role(board_id):
     finally:
         session.close()
 
+# ✅ NEW: list users in a board (owner + members). viewer/editor/admin can read.
+@app.get("/boards/<int:board_id>/users")
+def board_users(board_id):
+    u, session = auth_user()
+    try:
+        # access check: throws 404/403 if not allowed
+        _ = get_role_on_board(u, session, board_id)
+
+        b = session.query(Board).filter_by(id=board_id).first()
+        if not b:
+            abort(404, "board not found")
+
+        out = []
+        owner = session.get(User, b.user_id)
+        if owner:
+            out.append({
+                "id": owner.id,
+                "email": owner.email,
+                "username": owner.username,
+                "role": "admin",
+            })
+
+        members = (
+            session.query(User, BoardMember.role)
+            .join(BoardMember, BoardMember.user_id == User.id)
+            .filter(BoardMember.board_id == board_id)
+            .all()
+        )
+        for usr, role in members:
+            if owner and usr.id == owner.id:
+                continue
+            out.append({
+                "id": usr.id,
+                "email": usr.email,
+                "username": usr.username,
+                "role": (role or "viewer"),
+            })
+
+        out.sort(key=lambda x: ((x.get("username") or "").lower(), x.get("id") or 0))
+        return jsonify(out)
+    finally:
+        session.close()
 
 # ---------- INVITES ----------
 @app.post("/boards/<int:board_id>/invites")
@@ -511,18 +604,15 @@ def create_invite(board_id):
         if not b:
             abort(404, "board not found")
 
-        # ONLY admin (owner) can invite
-        role_u = get_role_on_board(u, session, b.id)  # owner => admin, member-role otherwise
+        role_u = get_role_on_board(u, session, b.id)
         require_role(role_u, {"admin"})
 
-        # already member?
         target_user = session.query(User).filter(User.email == email).first()
         if target_user:
             existing = session.query(BoardMember).filter_by(board_id=b.id, user_id=target_user.id).first()
             if existing:
                 abort(409, "user already member")
 
-        # reinvite strategy (keep): revoke pending invites for same email/board
         session.query(BoardInvite).filter(
             BoardInvite.board_id == b.id,
             BoardInvite.email == email,
@@ -601,9 +691,21 @@ def list_tags():
     u, session = auth_user()
     try:
         b = require_board_access(u, session)
-        # viewer/editor/admin can read
         tags = session.query(Tag).filter_by(board_id=b.id).order_by(Tag.name.asc()).all()
         return jsonify([t_tag(t) for t in tags])
+    finally:
+        session.close()
+
+# Compatibility for FE (storageApi.js): POST /boards/<id>/tags
+@app.post("/boards/<int:board_id>/tags")
+def create_tag_scoped(board_id):
+    u, session = auth_user()
+    data = request.get_json(force=True) or {}
+    # force board_id
+    data["board_id"] = board_id
+    try:
+        # reuse logic by calling the function body below
+        return _create_tag_impl(u, session, data)
     finally:
         session.close()
 
@@ -611,25 +713,28 @@ def list_tags():
 def create_tag():
     u, session = auth_user()
     data = request.get_json(force=True) or {}
+    try:
+        return _create_tag_impl(u, session, data)
+    finally:
+        session.close()
+
+def _create_tag_impl(u, session, data):
     name = (data.get("name") or "").strip()
     color = (data.get("color") or "").strip() or None
     if not name:
         abort(400, "name is required")
-    try:
-        b = require_board_access(u, session)
-        role_u = get_role_on_board(u, session, b.id)
-        # ASSUNZIONE: solo admin gestisce tag
-        require_role(role_u, {"admin"})
+    # require board access uses either query or payload board_id
+    b = require_board_access(u, session)
+    role_u = get_role_on_board(u, session, b.id)
+    require_role(role_u, {"admin"})
 
-        exists = session.query(Tag).filter_by(board_id=b.id, name=name).first()
-        if exists:
-            abort(409, "tag already exists")
-        t = Tag(user_id=u.id, board_id=b.id, name=name, color=color)
-        session.add(t)
-        session.commit()
-        return jsonify(t_tag(t)), 201
-    finally:
-        session.close()
+    exists = session.query(Tag).filter_by(board_id=b.id, name=name).first()
+    if exists:
+        abort(409, "tag already exists")
+    t = Tag(user_id=u.id, board_id=b.id, name=name, color=color)
+    session.add(t)
+    session.commit()
+    return jsonify(t_tag(t)), 201
 
 @app.patch("/tags/<int:tag_id>")
 def update_tag(tag_id):
@@ -685,7 +790,6 @@ def list_tasks():
     u, session = auth_user()
     try:
         b = require_board_access(u, session)
-        # viewer/editor/admin can read
         status = request.args.get("status")
         q = session.query(Task).filter(Task.board_id == b.id)
         if status:
@@ -697,51 +801,98 @@ def list_tasks():
     finally:
         session.close()
 
+# Compatibility for FE (storageApi.js): POST /boards/<id>/tasks
+@app.post("/boards/<int:board_id>/tasks")
+def create_task_scoped(board_id):
+    u, session = auth_user()
+    data = request.get_json() or {}
+    data["board_id"] = board_id
+    try:
+        return _create_task_impl(u, session, data)
+    finally:
+        session.close()
+
 @app.post("/tasks")
 def create_task():
     u, session = auth_user()
     data = request.get_json() or {}
+    try:
+        return _create_task_impl(u, session, data)
+    finally:
+        session.close()
+
+def _create_task_impl(u, session, data):
     title = (data.get("title") or "").strip()
     description = (data.get("description") or "").strip() or None
     status = data.get("status", "todo")
     priority = (data.get("priority") or "LOW").upper()
+
+    assignee_id = data.get("assignee_id", None)
+
     if priority not in VALID_PRIORITIES:
         abort(400, "invalid priority")
     if not title:
         abort(400, "title required")
     if status not in VALID_STATUSES:
         abort(400, "invalid status")
+
+    b = require_board_access(u, session)
+    role_u = get_role_on_board(u, session, b.id)
+    require_role(role_u, {"admin", "editor"})  # viewer cannot create
+
+    # ✅ policy: editor can assign ONLY to self; admin can assign to any user in board
+    if assignee_id in ("", None):
+        assignee_id = None
+    else:
+        try:
+            assignee_id = int(assignee_id)
+        except Exception:
+            abort(400, "invalid assignee_id")
+
+        if not _is_user_in_board(session, b.id, assignee_id):
+            abort(400, "assignee_id not in board")
+
+        if role_u == "editor" and assignee_id != u.id:
+            abort(403, "editors can assign only to themselves")
+
+    last = (
+        session.query(Task)
+        .filter_by(board_id=b.id, status=status)
+        .order_by(Task.order_index.desc())
+        .first()
+    )
+    next_idx = (last.order_index + 1) if last else 0
+
+    t = Task(
+        user_id=u.id,
+        board_id=b.id,
+        title=title,
+        description=description,
+        status=status,
+        order_index=next_idx,
+        priority=priority,
+        assignee_id=assignee_id,
+    )
+    session.add(t)
+
+    tag_ids = data.get("tag_ids") or []
+    if tag_ids:
+        tags = session.query(Tag).filter(Tag.board_id==b.id, Tag.id.in_(tag_ids)).all()
+        t.tags = tags
+
+    session.commit()
+    return jsonify(t_task(t)), 201
+
+# Compatibility for FE (storageApi.js): PATCH /boards/<board_id>/tasks/<task_id>
+@app.patch("/boards/<int:board_id>/tasks/<int:task_id>")
+def update_task_scoped(board_id, task_id):
+    # board_id is taken from path (safer for FE), but we still rely on require_board_access
+    u, session = auth_user()
+    data = request.get_json() or {}
+    # enforce board_id in payload so require_board_access works without querystring
+    data["board_id"] = board_id
     try:
-        b = require_board_access(u, session)
-        role_u = get_role_on_board(u, session, b.id)
-        require_role(role_u, {"admin", "editor"})  # viewer cannot create
-
-        last = (
-            session.query(Task)
-            .filter_by(board_id=b.id, status=status)
-            .order_by(Task.order_index.desc())
-            .first()
-        )
-        next_idx = (last.order_index + 1) if last else 0
-
-        t = Task(
-            user_id=u.id,
-            board_id=b.id,
-            title=title,
-            description=description,
-            status=status,
-            order_index=next_idx,
-            priority=priority
-        )
-        session.add(t)
-
-        tag_ids = data.get("tag_ids") or []
-        if tag_ids:
-            tags = session.query(Tag).filter(Tag.board_id==b.id, Tag.id.in_(tag_ids)).all()
-            t.tags = tags
-
-        session.commit()
-        return jsonify(t_task(t)), 201
+        return _update_task_impl(u, session, task_id, data)
     finally:
         session.close()
 
@@ -750,61 +901,83 @@ def update_task(task_id):
     u, session = auth_user()
     data = request.get_json() or {}
     try:
-        b = require_board_access(u, session)
-        role_u = get_role_on_board(u, session, b.id)
-        require_role(role_u, {"admin", "editor"})  # viewer cannot edit
-
-        t = session.query(Task).filter_by(id=task_id, board_id=b.id).first()
-        if not t:
-            abort(404, "task not found")
-
-        # editor can modify ONLY own tasks
-        if role_u == "editor" and t.user_id != u.id:
-            abort(403, "editors can modify only their tasks")
-
-        if "title" in data:
-            new_title = (data["title"] or "").strip()
-            if not new_title:
-                abort(400, "title cannot be empty")
-            t.title = new_title
-        if "description" in data:
-            t.description = (data["description"] or "").strip() or None
-        if "status" in data:
-            new_status = data["status"]
-            if new_status not in VALID_STATUSES:
-                abort(400, "invalid status")
-            if new_status != t.status:
-                last = (
-                    session.query(Task)
-                    .filter_by(board_id=b.id, status=new_status)
-                    .order_by(Task.order_index.desc())
-                    .first()
-                )
-                t.status = new_status
-                t.order_index = (last.order_index + 1) if last else 0
-        if "order_index" in data:
-            t.order_index = int(data["order_index"])
-
-        if "tag_ids" in data:
-            tag_ids = data.get("tag_ids") or []
-            if not isinstance(tag_ids, list):
-                abort(400, "tag_ids must be an array")
-            new_tags = session.query(Tag).filter(
-                Tag.board_id==b.id, Tag.id.in_(tag_ids)
-            ).all() if tag_ids else []
-            t.tags = new_tags
-
-        if "priority" in data:
-            new_prio = (data["priority"] or "").upper()
-            if new_prio not in VALID_PRIORITIES:
-                abort(400, "invalid priority")
-            t.priority = new_prio
-
-        t.updated_at = datetime.utcnow()
-        session.commit()
-        return jsonify(t_task(t))
+        return _update_task_impl(u, session, task_id, data)
     finally:
         session.close()
+
+def _update_task_impl(u, session, task_id, data):
+    b = require_board_access(u, session)
+    role_u = get_role_on_board(u, session, b.id)
+    require_role(role_u, {"admin", "editor"})
+
+    t = session.query(Task).filter_by(id=task_id, board_id=b.id).first()
+    if not t:
+        abort(404, "task not found")
+
+    # editor can modify ONLY own tasks
+    if role_u == "editor" and t.user_id != u.id:
+        abort(403, "editors can modify only their tasks")
+
+    if "title" in data:
+        new_title = (data["title"] or "").strip()
+        if not new_title:
+            abort(400, "title cannot be empty")
+        t.title = new_title
+    if "description" in data:
+        t.description = (data["description"] or "").strip() or None
+    if "status" in data:
+        new_status = data["status"]
+        if new_status not in VALID_STATUSES:
+            abort(400, "invalid status")
+        if new_status != t.status:
+            last = (
+                session.query(Task)
+                .filter_by(board_id=b.id, status=new_status)
+                .order_by(Task.order_index.desc())
+                .first()
+            )
+            t.status = new_status
+            t.order_index = (last.order_index + 1) if last else 0
+    if "order_index" in data:
+        t.order_index = int(data["order_index"])
+
+    if "tag_ids" in data:
+        tag_ids = data.get("tag_ids") or []
+        if not isinstance(tag_ids, list):
+            abort(400, "tag_ids must be an array")
+        new_tags = session.query(Tag).filter(
+            Tag.board_id==b.id, Tag.id.in_(tag_ids)
+        ).all() if tag_ids else []
+        t.tags = new_tags
+
+    if "priority" in data:
+        new_prio = (data["priority"] or "").upper()
+        if new_prio not in VALID_PRIORITIES:
+            abort(400, "invalid priority")
+        t.priority = new_prio
+
+    # ✅ NEW: update assignee_id
+    if "assignee_id" in data:
+        new_assignee = data.get("assignee_id", None)
+        if new_assignee in ("", None):
+            new_assignee = None
+        else:
+            try:
+                new_assignee = int(new_assignee)
+            except Exception:
+                abort(400, "invalid assignee_id")
+
+            if not _is_user_in_board(session, b.id, new_assignee):
+                abort(400, "assignee_id not in board")
+
+            if role_u == "editor" and new_assignee != u.id:
+                abort(403, "editors can assign only to themselves")
+
+        t.assignee_id = new_assignee
+
+    t.updated_at = datetime.utcnow()
+    session.commit()
+    return jsonify(t_task(t))
 
 @app.post("/tasks/reorder")
 def reorder_tasks():
@@ -840,7 +1013,7 @@ def delete_task(task_id):
     try:
         b = require_board_access(u, session)
         role_u = get_role_on_board(u, session, b.id)
-        require_role(role_u, {"admin", "editor"})  # viewer cannot delete
+        require_role(role_u, {"admin", "editor"})
 
         t = session.query(Task).filter_by(id=task_id, board_id=b.id).first()
         if not t:

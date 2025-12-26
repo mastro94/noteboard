@@ -33,6 +33,12 @@ export default function Column({
   // ✅ permessi
   boardRole = 'viewer',
   myUserId = null,
+
+  // ✅ NEW: assignee support
+  boardUsers = [],
+  editingAssigneeId = '',
+  setEditingAssigneeId = () => {},
+  canAssign = false,
 }) {
   const safeTasks = Array.isArray(tasks) ? tasks : []
   const total = typeof counters?.total === 'number' ? counters.total : safeTasks.length
@@ -52,7 +58,9 @@ export default function Column({
     <div className="column" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="columnHeader">
         <h2 style={{ margin: 0 }}>{LABELS[status]}</h2>
-        <span className="count">{safeTasks.length}/{total}</span>
+        <span className="count">
+          {safeTasks.length}/{total}
+        </span>
       </div>
 
       <div>
@@ -68,13 +76,11 @@ export default function Column({
               task={t}
               disableLeft={status === 'todo'}
               disableRight={status === 'done'}
-
               onRemove={onRemove}
               onEditStart={onEditStart}
               onMoveLeft={onMoveLeft}
               onMoveRight={onMoveRight}
               onDragStart={onDragStart}
-
               isEditing={String(editingId) === String(t.id)}
               editingTitle={editingTitle}
               setEditingTitle={setEditingTitle}
@@ -82,19 +88,20 @@ export default function Column({
               setEditingDesc={setEditingDesc}
               onSaveEdit={onSaveEdit}
               onCancelEdit={onCancelEdit}
-
               editingTagId={editingTagId}
               setEditingTagId={setEditingTagId}
               tagsList={tagsList}
-
               editingPriority={editingPriority}
               setEditingPriority={setEditingPriority}
-
-              // ✅ nuove props
               canDrag={canDrag}
               canEdit={canEdit}
               canMove={canMove}
               canDelete={canDelete}
+              // ✅ NEW props (assignee)
+              boardUsers={boardUsers}
+              editingAssigneeId={editingAssigneeId}
+              setEditingAssigneeId={setEditingAssigneeId}
+              canAssign={canAssign}
             />
           )
         })}

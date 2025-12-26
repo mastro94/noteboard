@@ -102,9 +102,7 @@ function InvitePage({ token, onDone }) {
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Invito a board</h2>
 
-        {err ? (
-          <div style={{ marginBottom: 10, color: '#b42318', fontSize: 13 }}>{String(err)}</div>
-        ) : null}
+        {err ? <div style={{ marginBottom: 10, color: '#b42318', fontSize: 13 }}>{String(err)}</div> : null}
 
         {boardTitle ? (
           <>
@@ -160,15 +158,23 @@ export default function App() {
   // ✅ Role on board (admin/editor/viewer)
   const [boardRole, setBoardRole] = useState('viewer')
 
+  // ✅ NEW: users in board (owner + members)
+  const [boardUsers, setBoardUsers] = useState([])
+
   // --- New Task form ---
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
   const [query, setQuery] = useState('')
 
+  // ✅ NEW: assignee in "create"
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState('')
+
   // --- Edit Task ---
   const [editingId, setEditingId] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [editingDesc, setEditingDesc] = useState('')
+  // ✅ NEW: assignee in "edit"
+  const [editingAssigneeId, setEditingAssigneeId] = useState('')
 
   // --- Tags ---
   const [tags, setTags] = useState([])
@@ -184,6 +190,12 @@ export default function App() {
 
   // --- Tabs ---
   const [activeTab, setActiveTab] = useState('tasks') // 'tasks' | 'tags' | 'boards'
+
+  // ---- Permessi (FE) ----
+  const myUserId = auth?.user?.id ?? auth?.user?.user_id ?? auth?.user?.uid ?? null
+  const canInvite = !isAPI ? false : boardRole === 'admin'
+  const canCreateTask = !isAPI ? true : boardRole === 'admin' || boardRole === 'editor'
+  const canAssignToOthers = !isAPI ? true : boardRole === 'admin' // editor solo a sé (enforced by BE)
 
   // Normalizza hash al primo load
   useEffect(() => {
@@ -214,8 +226,11 @@ export default function App() {
           setTasksApi([])
           setTags([])
           setBoards([])
+          setBoardUsers([])
           setActiveBoardId('')
           setBoardRole('viewer')
+          setSelectedAssigneeId('')
+          setEditingAssigneeId('')
           if (
             !route.startsWith(ROUTES.login) &&
             !route.startsWith(ROUTES.signup) &&
@@ -292,7 +307,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAPI, auth?.token])
 
-  // When board changes: load role + tasks/tags
+  // When board changes: load role + tasks/tags + users
   useEffect(() => {
     if (!isAPI) return
     const token = localStorage.getItem('nb_token')
@@ -303,9 +318,12 @@ export default function App() {
 
     setTasksApi([])
     setTags([])
+    setBoardUsers([])
     setSelectedTagId('')
     setActiveTagFilterId(null)
     setEditingId(null)
+    setEditingAssigneeId('')
+    setSelectedAssigneeId('')
     setActiveTab('tasks')
 
     let abort = false
@@ -315,13 +333,18 @@ export default function App() {
         const roleRes = await storage.getMyBoardRole(activeBoardId).catch(() => null)
         if (!abort) setBoardRole(roleRes?.role || 'viewer')
 
-        // 2) tasks + tags (NOTA: storageApi.js deve chiamare /tasks?board_id= e /tags?board_id=
-        const [ts, tgs] = await Promise.all([storage.listTasks(activeBoardId), storage.listTags(activeBoardId)])
+        // 2) users + tasks + tags
+        const [users, ts, tgs] = await Promise.all([
+          storage.listBoardUsers(activeBoardId).catch(() => []),
+          storage.listTasks(activeBoardId),
+          storage.listTags(activeBoardId),
+        ])
         if (abort) return
+        setBoardUsers(Array.isArray(users) ? users : [])
         setTasksApi(Array.isArray(ts) ? ts : [])
         setTags(Array.isArray(tgs) ? tgs : [])
       } catch (err) {
-        console.error('[BOARD] reload tasks/tags failed:', err)
+        console.error('[BOARD] reload tasks/tags/users failed:', err)
       }
     })()
 
@@ -378,6 +401,7 @@ export default function App() {
           setActiveBoardId('')
           setTasksApi([])
           setTags([])
+          setBoardUsers([])
           setBoardRole('viewer')
         }
       }
@@ -391,11 +415,6 @@ export default function App() {
   const onCreateInvite = async (boardId, email, role) => {
     return storage.createInvite(boardId, { email, role })
   }
-
-  // ---- Permessi (FE) ----
-  const myUserId = auth?.user?.id ?? auth?.user?.user_id ?? auth?.user?.uid ?? null
-  const canInvite = !isAPI ? false : boardRole === 'admin'
-  const canCreateTask = !isAPI ? true : boardRole === 'admin' || boardRole === 'editor'
 
   function assertCanEditTaskById(taskId) {
     if (!isAPI) return true
@@ -482,6 +501,13 @@ export default function App() {
       return
     }
 
+    // ✅ assignee policy FE (BE enforces anyway)
+    let assigneeForCreate = selectedAssigneeId
+    if (!canAssignToOthers) {
+      assigneeForCreate = String(myUserId ?? '')
+    }
+    if (assigneeForCreate === '') assigneeForCreate = null
+
     const chosenTag = tags.find((x) => String(x.id) === String(selectedTagId))
     const newTask = {
       id: uid(),
@@ -495,6 +521,7 @@ export default function App() {
       priority: selectedPriority,
       board_id: activeBoardId || undefined,
       user_id: myUserId || undefined,
+      assignee_id: assigneeForCreate ?? null,
     }
 
     setCurrentTasks((prev) => {
@@ -507,6 +534,7 @@ export default function App() {
     })
     setTitle('')
     setDesc('')
+    setSelectedAssigneeId('')
 
     if (isAPI) {
       storage
@@ -517,6 +545,7 @@ export default function App() {
           tag_ids: chosenTag ? [chosenTag.id] : [],
           priority: selectedPriority,
           board_id: activeBoardId,
+          assignee_id: newTask.assignee_id,
         })
         .then((created) => {
           setCurrentTasks((curr) => {
@@ -543,6 +572,7 @@ export default function App() {
     setEditingDesc(task.description || '')
     setEditingTagId(String(task?.tags?.[0]?.id ?? ''))
     setEditingPriority(task?.priority || 'LOW')
+    setEditingAssigneeId(String(task?.assignee_id ?? ''))
   }
 
   function saveEdit(id) {
@@ -555,6 +585,12 @@ export default function App() {
     const newDesc = (editingDesc || '').trim()
     const chosenTag = tags.find((x) => String(x.id) === String(editingTagId))
 
+    let nextAssignee = editingAssigneeId
+    if (!canAssignToOthers) {
+      nextAssignee = String(myUserId ?? '')
+    }
+    if (nextAssignee === '') nextAssignee = null
+
     setCurrentTasks((prev) =>
       prev.map((t) => {
         if (String(t.id) !== String(id)) return t
@@ -565,6 +601,7 @@ export default function App() {
           updated_at: new Date().toISOString(),
           tags: chosenTag ? [chosenTag] : [],
           priority: editingPriority,
+          assignee_id: nextAssignee ?? null,
         }
       })
     )
@@ -576,10 +613,12 @@ export default function App() {
       payload.description = newDesc
       payload.tag_ids = chosenTag ? [chosenTag.id] : []
       payload.priority = editingPriority
+      payload.assignee_id = nextAssignee
+
       const n = Number(id)
       storage
         .updateTask(Number.isFinite(n) ? n : id, payload, activeBoardId)
-        .catch((err) => console.error('[TASKS] PATCH title/desc/priority failed:', err))
+        .catch((err) => console.error('[TASKS] PATCH title/desc/priority/assignee failed:', err))
     }
   }
 
@@ -657,10 +696,16 @@ export default function App() {
   const counters = useMemo(() => ({ total: filtered.length }), [filtered])
 
   // ✅ permessi al drag hook
-  const { onCardDragStart, onColumnDragOver, onColumnDrop } = useDragAndDrop(currentTasks, setCurrentTasks, storage, activeBoardId, {
-    boardRole,
-    myUserId,
-  })
+  const { onCardDragStart, onColumnDragOver, onColumnDrop } = useDragAndDrop(
+    currentTasks,
+    setCurrentTasks,
+    storage,
+    activeBoardId,
+    {
+      boardRole,
+      myUserId,
+    }
+  )
 
   // ---- Auth gating ----
   async function logout() {
@@ -669,6 +714,7 @@ export default function App() {
     localStorage.removeItem(LS_ACTIVE_BOARD_KEY)
     setActiveBoardId('')
     setBoardRole('viewer')
+    setBoardUsers([])
     setAuth(null)
     window.location.hash = ROUTES.login
   }
@@ -939,6 +985,11 @@ export default function App() {
           setSelectedPriority={setSelectedPriority}
           PRIORITY_EMOJI={PRIORITY_EMOJI}
           canCreateTask={canCreateTask}
+          // ✅ NEW: assignee (create)
+          boardUsers={boardUsers}
+          selectedAssigneeId={selectedAssigneeId}
+          setSelectedAssigneeId={setSelectedAssigneeId}
+          canAssignToOthers={canAssignToOthers}
         />
       )}
 
@@ -979,6 +1030,11 @@ export default function App() {
             setEditingPriority={setEditingPriority}
             boardRole={boardRole}
             myUserId={myUserId}
+            // ✅ NEW: assignee props to Card via Column
+            boardUsers={boardUsers}
+            editingAssigneeId={editingAssigneeId}
+            setEditingAssigneeId={setEditingAssigneeId}
+            canAssign={canAssignToOthers || boardRole === 'editor'} // editor: true but BE will restrict to self
           />
         ))}
       </div>
