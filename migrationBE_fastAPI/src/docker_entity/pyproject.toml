@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "noteboard"
+version = "0.1.0"
+description = "Noteboard FastAPI backend"
+authors = ["Francesco Mastrostefano <francesco.mastrostefano.external@enel.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.128.1"
+uvicorn = "^0.40.0"
+sqlalchemy = "^2.0.46"
+passlib = "^1.7.4"
+pyjwt = "^2.11.0"
+python-dotenv = "^1.2.1"
+email-validator = "^2.3.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

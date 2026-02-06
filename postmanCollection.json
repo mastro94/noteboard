@@ -1,0 +1,216 @@
+{
+  "info": {
+    "_postman_id": "b2c3c2a8-1111-4a4a-9c9c-222222222222",
+    "name": "Noteboard API (FastAPI) - AUTH + BOARDS + INVITES + TASKS",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "token", "value": "" },
+    { "key": "boardId", "value": "" },
+    { "key": "taskId", "value": "" },
+    { "key": "inviteToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health" }
+    },
+    {
+      "name": "Auth - Register",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@example.com\",\n  \"username\": \"testuser\",\n  \"password\": \"Password!123\",\n  \"password2\": \"Password!123\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Auth - Login (sets token)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const j = pm.response.json();",
+              "  pm.collectionVariables.set('token', j.token);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/login",
+        "body": { "mode": "raw", "raw": "{\n  \"identifier\": \"test@example.com\",\n  \"password\": \"Password!123\"\n}" }
+      }
+    },
+    {
+      "name": "Me",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/me"
+      }
+    },
+    {
+      "name": "Boards - Create (sets boardId)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201 || pm.response.code === 200) {",
+              "  const j = pm.response.json();",
+              "  pm.collectionVariables.set('boardId', String(j.id));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/boards",
+        "body": { "mode": "raw", "raw": "{\n  \"title\": \"My Board\"\n}" }
+      }
+    },
+    {
+      "name": "Boards - List",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/boards"
+      }
+    },
+    {
+      "name": "Boards - My Role",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/boards/{{boardId}}/my-role"
+      }
+    },
+    {
+      "name": "Invites - Create (sets inviteToken)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200 || pm.response.code === 201) {",
+              "  const j = pm.response.json();",
+              "  const link = j.invite_link || '';",
+              "  const m = link.match(/token=([^&#]+)/);",
+              "  if (m && m[1]) pm.collectionVariables.set('inviteToken', m[1]);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/boards/{{boardId}}/invites",
+        "body": { "mode": "raw", "raw": "{\n  \"email\": \"test@example.com\",\n  \"role\": \"editor\"\n}" }
+      }
+    },
+    {
+      "name": "Invites - Preview",
+      "request": { "method": "GET", "url": "{{baseUrl}}/invites/{{inviteToken}}" }
+    },
+    {
+      "name": "Invites - Accept",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/invites/{{inviteToken}}/accept"
+      }
+    },
+    {
+      "name": "Tasks - Create (sets taskId)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201 || pm.response.code === 200) {",
+              "  const j = pm.response.json();",
+              "  pm.collectionVariables.set('taskId', String(j.id));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/tasks",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"board_id\": {{boardId}},\n  \"title\": \"Task 1\",\n  \"description\": \"desc\",\n  \"status\": \"todo\",\n  \"priority\": \"LOW\",\n  \"assignee_id\": null\n}"
+        }
+      }
+    },
+    {
+      "name": "Tasks - List (board scoped)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/tasks?board_id={{boardId}}"
+      }
+    },
+    {
+      "name": "Tasks - Update (status + assignee)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/tasks/{{taskId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"board_id\": {{boardId}},\n  \"status\": \"in_progress\",\n  \"assignee_id\": null\n}"
+        }
+      }
+    },
+    {
+      "name": "Tasks - Reorder (admin only)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/tasks/reorder",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"board_id\": {{boardId}},\n  \"status\": \"todo\",\n  \"ordered_ids\": [{{taskId}}]\n}"
+        }
+      }
+    },
+    {
+      "name": "Tasks - Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": "{{baseUrl}}/tasks/{{taskId}}?board_id={{boardId}}"
+      }
+    }
+  ]
+}
